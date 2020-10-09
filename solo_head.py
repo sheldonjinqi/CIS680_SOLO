@@ -50,7 +50,7 @@ class SOLOHead(nn.Module):
         # check flag
         assert len(self.ins_head) == self.stacked_convs
         assert len(self.cate_head) == self.stacked_convs
-        assert len(self.ins_out_list) == len(self.strides)
+        assert len(self.ins_out) == len(self.strides)
         pass
 
     # This function build network layer for cate and ins branch
@@ -159,6 +159,11 @@ class SOLOHead(nn.Module):
     # Output:
     # new_fpn_list, list, len(FPN), stride[8,8,16,32,32]
     def NewFPN(self, fpn_feat_list):
+        #downsample the corsest feature map
+        fpn_feat_list[0] = F.interpolate(fpn_feat_list[0],scale_factor=0.5)
+        #upsample the finest feature map
+        fpn_feat_list[-1] = F.interpolate(fpn_feat_list[-1],size=(25,34))
+        return fpn_feat_list
         pass
 
 
