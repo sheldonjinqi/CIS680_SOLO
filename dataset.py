@@ -14,10 +14,19 @@ class BuildDataset(torch.utils.data.Dataset):
         # TODO: load dataset, make mask list
         self.path = path
         imgs_path, masks_path,labels_path, bboxes_path = self.path
-        self.imgs_data = np.load(imgs_path, allow_pickle=True)["arr_0"]
-        self.masks_data =np.load(masks_path, allow_pickle=True)["arr_0"]
-        self.labels_data = np.load(labels_path, allow_pickle=True,encoding="latin1")["arr_0"]
-        self.bboxes_data = np.load(bboxes_path, allow_pickle=True)["arr_0"]
+        self.imgs_data = h5py.File(imgs_path,'r').get('data')
+        input_masks_data = h5py.File(masks_path,'r').get('data')
+        self.masks_data = []
+        self.labels_data = np.load(labels_path, allow_pickle=True,encoding="latin1")
+        self.bboxes_data = np.load(bboxes_path, allow_pickle=True)
+        idx = 0
+        #linking the mask and image
+        for i in range(len(self.imgs_data)):
+            num_mask = len(self.labels_data[i])
+            self.masks_data.append(input_masks_data[idx:num_mask+idx,:,:])
+            idx += num_mask
+
+
 
 
 
@@ -36,7 +45,7 @@ class BuildDataset(torch.utils.data.Dataset):
         label = torch.tensor(self.labels_data[index],dtype = torch.float)
         mask = torch.tensor(self.mask_data[index],dtype = torch.float)
         transed_img, transed_mask, transed_bbox = self.pre_process_batch(img,mask,bbox)
-        
+
         # check flag
         assert transed_img.shape == (3, 800, 1088)
         assert transed_bbox.shape[0] == transed_mask.shape[0]
@@ -99,7 +108,10 @@ if __name__ == '__main__':
     paths = [imgs_path, masks_path, labels_path, bboxes_path]
     # load the data into data.Dataset
     dataset = BuildDataset(paths)
-
+    print(dataset.imgs_data.shape)
+    print(dataset.labels_data[:2])
+    print(dataset.masks_data.shape)
+    print(dataset.bboxes_data.shape)
     ## Visualize debugging
     # --------------------------------------------
     # build the dataloader
