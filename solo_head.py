@@ -64,15 +64,67 @@ class SOLOHead(nn.Module):
         # define groupnorm
         num_groups = 32
         # initial the two branch head modulelist
-        self.cate_head = nn.ModuleList()
-        self.ins_head = nn.ModuleList()
 
+        #defines the conv layer
+        self.simple_conv = nn.Sequential(
+            nn.Conv2d(256,256,kernel_size=3,stride=1,padding=1,bias=False),
+            nn.GroupNorm(32,256),
+            nn.ReLU()
+        )
+        #definee the first conv layer of mask branch
+        self.ins_conv_1 = nn.Sequential(
+            nn.Conv2d(258,256,kernel_size=3,stride=1,padding=1,bias=False),
+            nn.GroupNorm(32,256),
+            nn.ReLU()
+        )
+
+        self.cate_head = nn.ModuleList([self.simple_conv for _ in range(7)])  #define cnn here
+        self.ins_head = nn.ModuleList([self.simple_conv if i!=0 else self.ins_conv_1 for i in range(7)])
+        # self.ins_head.append(self.ins_conv_1)
+        # for i in range(6):
+        #     self.ins_head.append(self.simple_conv)
+
+        self.cate_out = nn.Sequential(
+            nn.Conv2d(256,self.cate_out_channels,kernel_size=3,stride=1,padding=1,bias=True),
+            nn.Sigmoid()
+        )
+
+        self.ins_out = nn.ModuleList()
+        for num_grid in self.seg_num_grids:
+            conv_out = nn.Sequential(
+                nn.Conv2d(256, num_grid **2,kernel_size=1, padding=1,bias=True),
+                nn.Sigmoid()
+            )
+            self.ins_out.append(conv_out)
         pass
 
+
+
+    def weights_init(self,m):
+        if isinstance(m, nn.Conv2d):
+            nn.init.xavier_uniform_(m.weight)
+            # print('weight',m.weight)
     # This function initialize weights for head network
+
+    def bias_init(self,m):
+        if isinstance(m, nn.Conv2d):
+            nn.init.zeros_(m.bias)
+            # print('bias',m.bias)
     def _init_weights(self):
         ## TODO: initialize the weights
+
+        #test
+        self.cate_head.apply(self.weights_init)
+        self.ins_head.apply(self.weights_init)
+        # print('initialized convolutional layer weight')
+
+        #initialize the bias of the two conv_out layer to 0
+        self.cate_out.apply(self.bias_init)
+        self.ins_out.apply(self.bias_init)
+        # print('initialized bias')
         pass
+
+
 
 
     # Forward function should forward every levels in the FPN.
@@ -220,9 +272,9 @@ class SOLOHead(nn.Module):
         # remember, you want to construct target of the same resolution as prediction output in training
 
         # check flag
-        assert ins_gts_list[0][1].shape = (self.seg_num_grids[1]**2, 200, 272)
-        assert ins_ind_gts_list[0][1].shape = (self.seg_num_grids[1]**2,)
-        assert cate_gts_list[0][1].shape = (self.seg_num_grids[1], self.seg_num_grids[1])
+        assert ins_gts_list[0][1].shape == (self.seg_num_grids[1]**2, 200, 272)
+        assert ins_ind_gts_list[0][1].shape == (self.seg_num_grids[1]**2,)
+        assert cate_gts_list[0][1].shape == (self.seg_num_grids[1], self.seg_num_grids[1])
 
         return ins_gts_list, ins_ind_gts_list, cate_gts_list
     # -----------------------------------

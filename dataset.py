@@ -65,10 +65,11 @@ class BuildDataset(torch.utils.data.Dataset):
         img=F.interpolate(img, size=800)
         img=img.permute(0, 2, 1)
         #normalize each channel
-        normalize = transforms.Normalize((0.485,0.456,0.406),(0.229,0.224,0.225))
+        print('mean before preprocess',torch.mean(img,(1,2)),torch.std(img,(1,2)))
+        normalize = transforms.Normalize((0.485,0.456,0.406),(0.229,0.224,0.225),inplace = False)
         img = normalize(img)
         img = F.pad(img, (11, 11))
-        # print('max after preprocess', torch.max(img))
+        print('max after preprocess', torch.max(img))
         # exit()
         # check flag
         # print(bbox.shape[0], mask.squeeze(0).shape[0])
