@@ -12,6 +12,14 @@ import matplotlib.patches as patches
 class BuildDataset(torch.utils.data.Dataset):
     def __init__(self, path):
         # TODO: load dataset, make mask list
+        self.path = path
+        imgs_path, masks_path,labels_path, bboxes_path = self.path
+        self.imgs_data = np.load(imgs_path, allow_pickle=True)["arr_0"]
+        self.masks_data =np.load(masks_path, allow_pickle=True)["arr_0"]
+        self.labels_data = np.load(labels_path, allow_pickle=True,encoding="latin1")["arr_0"]
+        self.bboxes_data = np.load(bboxes_path, allow_pickle=True)["arr_0"]
+
+
 
     # output:
         # transed_img
@@ -21,6 +29,18 @@ class BuildDataset(torch.utils.data.Dataset):
     def __getitem__(self, index):
         # TODO: __getitem__
 
+        #normalize the pixel value to [0,1]
+        img = torch.tensor((self.imgs_data[index]/255-0.5)/0.5, dtype  = torch.float)
+        #rescaling
+        img = F.interpolate(img,(3,800,1066))
+        #normalize each channel
+        normalize = transforms.Normalize((0.485,0.456,0.406),(0.229,0.224,0.225))
+        transed_img = normalize(img)
+        #zero-padding
+        transed_img = F.pad(transed_img,(11,11))
+        transed_bbox = torch.tensor(self.bbox_data[index],dtype = torch.float)
+        label = torch.tensor(self.labels_data[index],dtype = torch.float)
+        transed_mask = torch.tensor(self.mask_data[index],dtype = torch.float)
         # check flag
         assert transed_img.shape == (3, 800, 1088)
         assert transed_bbox.shape[0] == transed_mask.shape[0]
