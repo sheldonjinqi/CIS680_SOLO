@@ -13,7 +13,7 @@ class BuildDataset(torch.utils.data.Dataset):
     def __init__(self, path):
         # TODO: load dataset, make mask list
         self.path = path
-        imgs_path, masks_path,labels_path, bboxes_path = self.path
+        imgs_path, masks_path, labels_path, bboxes_path = self.path
         self.imgs_data = h5py.File(imgs_path,'r').get('data')
         input_masks_data = h5py.File(masks_path,'r').get('data')
         self.masks_data = []
@@ -25,10 +25,7 @@ class BuildDataset(torch.utils.data.Dataset):
             num_mask = len(self.labels_data[i])
             self.masks_data.append(input_masks_data[idx:num_mask+idx,:,:])
             idx += num_mask
-
-
-
-
+        # self.masks_data = np.asarray(self.masks_data)
 
     # output:
         # transed_img
@@ -41,9 +38,9 @@ class BuildDataset(torch.utils.data.Dataset):
         #normalize the pixel value to [0,1]
         img = torch.tensor((self.imgs_data[index]/255-0.5)/0.5, dtype  = torch.float)
 
-        bbox = torch.tensor(self.bbox_data[index],dtype = torch.float)
+        bbox = torch.tensor(self.bboxes_data[index],dtype = torch.float)
         label = torch.tensor(self.labels_data[index],dtype = torch.float)
-        mask = torch.tensor(self.mask_data[index],dtype = torch.float)
+        mask = torch.tensor(self.masks_data[index].astype(np.float32),dtype = torch.float)
         transed_img, transed_mask, transed_bbox = self.pre_process_batch(img,mask,bbox)
 
         # check flag
@@ -62,18 +59,25 @@ class BuildDataset(torch.utils.data.Dataset):
     def pre_process_batch(self, img, mask, bbox):
         # TODO: image preprocess
         #normalize the pixel value to [0,1]
-        img = torch.tensor((img/255-0.5)/0.5, dtype  = torch.float)
-        #rescaling
-        img = F.interpolate(img,(3,800,1066))
+        # img = torch.tensor((img/255.0-0.5)/0.5, dtype = torch.float)  # ??
+        # img = torch.tensor((img / 255.0), dtype=torch.float)
+        # rescaling
+        # img = F.interpolate(img,(3,800,1066))
+        img = F.interpolate(img, size=1066)
+        img=img.permute(0, 2, 1)
+        img=F.interpolate(img, size=800)
+        img=img.permute(0, 2, 1)
+
         #normalize each channel
         normalize = transforms.Normalize((0.485,0.456,0.406),(0.229,0.224,0.225))
         img = normalize(img)
-
         img = F.pad(img, (11, 11))
 
         # check flag
+        # print(bbox.shape[0], mask.squeeze(0).shape[0])
+        # print(bbox,mask)
         assert img.shape == (3, 800, 1088)
-        assert bbox.shape[0] == mask.squeeze(0).shape[0]
+        assert bbox.shape[0] == mask.shape[0]
         return img, mask, bbox
 
 
@@ -92,11 +96,27 @@ class BuildDataLoader(torch.utils.data.DataLoader):
         # img: (bz, 3, 300, 400)
     def collect_fn(self, batch):
         # TODO: collect_fn
-        return None
+        transed_img_list = []
+        label_list = []
+        transed_mask_list = []
+        transed_bbox_list = []
+        for transed_img, label, transed_mask, transed_bbox in batch:
+            transed_img_list.append(transed_img)
+            label_list.append(label)
+            transed_mask_list.append(transed_mask)
+            transed_bbox_list.append(transed_bbox)
+
+        # return torch.stack([transed_img_list,label_list, transed_mask_list,transed_bbox_list], dim=0)
+        return torch.stack(transed_img_list,dim=0),\
+               label_list, \
+               transed_mask_list,\
+               transed_bbox_list
 
     def loader(self):
         # TODO: return a dataloader
-        return None
+
+        return DataLoader(self.dataset, collate_fn=self.collect_fn, batch_size=self.batch_size,
+                          shuffle=self.shuffle, num_workers=self.num_workers)
 
 ## Visualize debugging
 if __name__ == '__main__':
@@ -110,7 +130,7 @@ if __name__ == '__main__':
     dataset = BuildDataset(paths)
     print(dataset.imgs_data.shape)
     print(dataset.labels_data[:2])
-    print(dataset.masks_data.shape)
+    # print(dataset.masks_data.shape)
     print(dataset.bboxes_data.shape)
     ## Visualize debugging
     # --------------------------------------------
@@ -123,8 +143,8 @@ if __name__ == '__main__':
     # set seed
     torch.random.manual_seed(1)
     train_dataset, test_dataset = torch.utils.data.random_split(dataset, [train_size, test_size])
-    # push the randomized training data into the dataloader
 
+    # push the randomized training data into the dataloader
     batch_size = 2
     train_build_loader = BuildDataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
     train_loader = train_build_loader.loader()
@@ -135,7 +155,7 @@ if __name__ == '__main__':
     # loop the image
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     for iter, data in enumerate(train_loader, 0):
-
+        print(len([data[i] for i in range(len(data))]))
         img, label, mask, bbox = [data[i] for i in range(len(data))]
         # check flag
         assert img.shape == (batch_size, 3, 800, 1088)
@@ -149,9 +169,20 @@ if __name__ == '__main__':
         # plot the origin img
         for i in range(batch_size):
             ## TODO: plot images with annotations
-            plt.savefig("./testfig/visualtrainset"+str(iter)+".png")
+            # plt.savefig("./testfig/visualtrainset"+str(iter)+".png")
+            image = img[i]
+            im = np.zeros((800, 1088, 3))
+            im[:, :, 0] = image[0, :, :]
+            im[:, :, 1] = image[1, :, :]
+            im[:, :, 2] = image[2, :, :]
+            # im = (im * 0.5 + 0.5) * 255
+            # img / 255 - 0.5) / 0.5
+            fig, ax = plt.subplots(1)
+            ### Display the image ###
+            ax.imshow(np.squeeze(im))
             plt.show()
+            print(label[i].shape,mask[i].shape,bbox[i].shape)
 
-        if iter == 10:
+        if iter == 1:
             break
 
