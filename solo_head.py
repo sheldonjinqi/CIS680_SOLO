@@ -393,7 +393,7 @@ class SOLOHead(nn.Module):
             x_dim = x_br_grid-x_tl_grid
             y_dim = y_br_grid - y_tl_grid
 
-
+            #test
              #centr index in feature map
 
 
