@@ -6,6 +6,7 @@ from scipy import ndimage
 from dataset import *
 from functools import partial
 import pdb
+from scipy import ndimage
 
 class SOLOHead(nn.Module):
     def __init__(self,
@@ -209,8 +210,8 @@ class SOLOHead(nn.Module):
 
 
         #normalize x,y to (-1,1)
-        tensor_w = ((torch.arange(0, w) // w ) - 0.5) * 2
-        tensor_h = ((torch.arange(0, h) // h) - 0.5) * 2
+        tensor_w = ((torch.arange(0, w) / float(w) ) - 0.5) * 2
+        tensor_h = ((torch.arange(0, h) / float(h)) - 0.5) * 2
 
         mesh_w, mesh_h = torch.meshgrid(tensor_w, tensor_h)
 
@@ -319,7 +320,7 @@ class SOLOHead(nn.Module):
         # TODO: use MultiApply to compute ins_gts_list, ins_ind_gts_list, cate_gts_list. Parallel w.r.t. img mini-batch
 
         # remember, you want to construct target of the same resolution as prediction output in training
-        featmap_sizes = [np.sqrt(featmap.shape[1]) for featmap in ins_pred_list ]
+        featmap_sizes = [(featmap.shape[2],featmap.shape[3]) for featmap in ins_pred_list ]
         ins_label_list, ins_ind_label_list, cate_label_list = self.MultiApply(self.targer_single_img, \
                                                                               bbox_list, label_list,
                                                                               mask_list, featmap_sizes
@@ -352,13 +353,53 @@ class SOLOHead(nn.Module):
         # compute the area of every object in this single image
 
         # initial the output list, each entry for one featmap
-
-
-
         w = torch.abs(gt_bboxes_raw[:,0] - gt_bboxes_raw[:,2])
         h = torch.abs(gt_bboxes_raw[:,1] - gt_bboxes_raw[:,1])
 
-        scale = torch.sqrt(w*h)
+        scale = torch.sqrt(w * h)
+        center_list = [ndimage.measurements.center_of_mass(mask.numpy()) for mask in gt_masks_raw]
+
+        for i in range(len(featmap_sizes)):
+            cate_label = torch.zeros((self.seg_num_grids[i],self.seg_num_grids[i]))
+            ins_label = torch.zeros((self.seg_num_grids[i]**2,featmap_sizes[0],featmap_sizes[1]))
+            ins_ind_label_list = torch.zeros(self.seg_num_grids[i]**2)
+
+            scale_range = self.scale_ranges[i]
+
+            #check object scale
+            idx = torch.where(scale > scale_range[0] & scale < scale_range[1])
+            print('idx',idx)
+            if not idx:
+                continue
+            center = np.asarray(center_list[idx])
+            center_x = center[:,0]
+            center_y = center[:,1]
+            w *= 0.2
+            h *= 0.2
+
+            x_tl = center_x - w/2
+            y_tl = center_y + h/2
+            x_br = center_x + w/2
+            y_br = center_y  - h/2
+
+            x_tl_grid = x_tl/(800/self.seg_num_grids)
+            y_tl_grid = y_tl/(1088/self.seg_num_grids)
+            x_br_grid = x_br/(800/self.seg_num_grids)
+            y_br_grid = y_br/(1088/self.seg_num_grids)
+
+            center_x /= 800/self.seg_num_grids
+            center_y /= 1088/self.seg_num_grids
+
+            x_dim = x_br_grid-x_tl_grid
+            y_dim = y_br_grid - y_tl_grid
+
+
+             #centr index in feature map
+
+
+
+
+
         ins_label_list = []
         ins_ind_label_list = []
         cate_label_list = []
