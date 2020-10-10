@@ -70,6 +70,18 @@ class BuildDataset(torch.utils.data.Dataset):
         img = normalize(img)
         img = F.pad(img, (11, 11))
         print('max after preprocess', torch.max(img))
+
+        # same process to mask
+        mask = F.interpolate(mask, size=1066)
+        mask = mask.permute(0, 2, 1)
+        mask = F.interpolate(mask, size=800)
+        mask = mask.permute(0, 2, 1)
+        mask = F.pad(mask, (11, 11))
+
+        bbox = bbox * 8/3
+        bbox[:,0] += 11
+        bbox[:,2] += 11
+
         # exit()
         # check flag
         # print(bbox.shape[0], mask.squeeze(0).shape[0])
@@ -167,20 +179,38 @@ if __name__ == '__main__':
         # plot the origin img
         for i in range(batch_size):
             ## TODO: plot images with annotations
-            # plt.savefig("./testfig/visualtrainset"+str(iter)+".png")
+            # plot img
             image = img[i]
             im = np.zeros((800, 1088, 3))
             im[:, :, 0] = image[0, :, :]
             im[:, :, 1] = image[1, :, :]
             im[:, :, 2] = image[2, :, :]
-            # im = (im * 0.5 + 0.5) * 255
-            # img / 255 - 0.5) / 0.5
             fig, ax = plt.subplots(1)
             ### Display the image ###
             ax.imshow(np.squeeze(im))
+
+            # plot bounding box
+            for box in bbox[i]:
+                # Create a Rectangle patch
+                print(box)
+                x,y = box[0], box[1]
+                w = (box[2]-box[0])
+                h = (box[3]-box[1])
+                rect = patches.Rectangle((x,y), w, h,
+                                         linewidth=1, edgecolor='r', facecolor='none')
+                # Add the patch to the Axes
+                ax.add_patch(rect)
+
+            # plot mask
+            for j,msk in enumerate(mask[i]):
+                cls = label[i][j]
+                msk = np.ma.masked_where(msk == 0, msk)
+                plt.imshow(msk, mask_color_list[int(cls)], interpolation='none', alpha=0.7)
+
+            # plt.savefig("./testfig/visualtrainset"+str(iter)+"_"+ str(i)+".png")
             plt.show()
             # print(label[i].shape,mask[i].shape,bbox[i].shape)
 
-        if iter == 1:
+        if iter == 2:
             break
 
