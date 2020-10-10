@@ -5,6 +5,7 @@ import numpy as np
 from scipy import ndimage
 from dataset import *
 from functools import partial
+import pdb
 
 class SOLOHead(nn.Module):
     def __init__(self,
@@ -144,6 +145,7 @@ class SOLOHead(nn.Module):
         new_fpn_list = self.NewFPN(fpn_feat_list)  # stride[8,8,16,32,32]
         assert new_fpn_list[0].shape[1:] == (256,100,136)
         quart_shape = [new_fpn_list[0].shape[-2]*2, new_fpn_list[0].shape[-1]*2]  # stride: 4
+        print('quart_shape',quart_shape)
         # TODO-Done: use MultiApply to compute cate_pred_list, ins_pred_list. Parallel w.r.t. feature level.
         for i in new_fpn_list:
             print(i.shape)
@@ -204,8 +206,11 @@ class SOLOHead(nn.Module):
         # concatenate 2 normalized meshgrid x,y
         w = fpn_feat.size()[2]
         h = fpn_feat.size()[3]
-        tensor_w = ((torch.arange(0, w) / w ) - 0.5) * 2
-        tensor_h = ((torch.arange(0, h) / h) - 0.5) * 2
+
+
+        #normalize x,y to (-1,1)
+        tensor_w = ((torch.arange(0, w) // w ) - 0.5) * 2
+        tensor_h = ((torch.arange(0, h) // h) - 0.5) * 2
 
         mesh_w, mesh_h = torch.meshgrid(tensor_w, tensor_h)
 
@@ -223,7 +228,6 @@ class SOLOHead(nn.Module):
 
         # sample output to (bz, S^2, 2H_feat, 2W_feat)
         ins_pred = F.interpolate(ins_pred, scale_factor=2) # expected shape [bz,S^2, 2w, 2h]
-
 
         # in inference time, upsample the pred to (ori image size/4)
         if eval == True:
@@ -313,7 +317,13 @@ class SOLOHead(nn.Module):
                label_list,
                mask_list):
         # TODO: use MultiApply to compute ins_gts_list, ins_ind_gts_list, cate_gts_list. Parallel w.r.t. img mini-batch
+
         # remember, you want to construct target of the same resolution as prediction output in training
+        featmap_sizes = [np.sqrt(featmap.shape[1]) for featmap in ins_pred_list ]
+        ins_label_list, ins_ind_label_list, cate_label_list = self.MultiApply(self.targer_single_img, \
+                                                                              bbox_list, label_list,
+                                                                              mask_list, featmap_sizes
+                                                                              )
 
         # check flag
         assert ins_gts_list[0][1].shape == (self.seg_num_grids[1]**2, 200, 272)
