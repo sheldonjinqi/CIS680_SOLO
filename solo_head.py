@@ -6,7 +6,6 @@ from scipy import ndimage
 from dataset import *
 from functools import partial
 import pdb
-from scipy import ndimage
 
 class SOLOHead(nn.Module):
     def __init__(self,
@@ -210,7 +209,7 @@ class SOLOHead(nn.Module):
 
 
         #normalize x,y to (-1,1)
-        tensor_w = ((torch.arange(0, w) / float(w) ) - 0.5) * 2
+        tensor_w = ((torch.arange(0, w) / float(w)) - 0.5) * 2
         tensor_h = ((torch.arange(0, h) / float(h)) - 0.5) * 2
 
         mesh_w, mesh_h = torch.meshgrid(tensor_w, tensor_h)
@@ -320,8 +319,8 @@ class SOLOHead(nn.Module):
         # TODO: use MultiApply to compute ins_gts_list, ins_ind_gts_list, cate_gts_list. Parallel w.r.t. img mini-batch
 
         # remember, you want to construct target of the same resolution as prediction output in training
-        featmap_sizes = [(featmap.shape[2],featmap.shape[3]) for featmap in ins_pred_list ]
-        ins_label_list, ins_ind_label_list, cate_label_list = self.MultiApply(self.targer_single_img, \
+        featmap_sizes = [[(featmap.shape[2],featmap.shape[3]) for featmap in ins_pred_list ]] * len(mask_list)
+        ins_gts_list, ins_ind_gts_list, cate_gts_list = self.MultiApply(self.targer_single_img, \
                                                                               bbox_list, label_list,
                                                                               mask_list, featmap_sizes
                                                                               )
@@ -352,58 +351,89 @@ class SOLOHead(nn.Module):
         ## TODO: finish single image target build
         # compute the area of every object in this single image
 
+        ins_label_list = []
+        ins_ind_label_list = []
+        cate_label_list = []
+
         # initial the output list, each entry for one featmap
         w = torch.abs(gt_bboxes_raw[:,0] - gt_bboxes_raw[:,2])
-        h = torch.abs(gt_bboxes_raw[:,1] - gt_bboxes_raw[:,1])
+        h = torch.abs(gt_bboxes_raw[:,3] - gt_bboxes_raw[:,1])
 
         scale = torch.sqrt(w * h)
         center_list = [ndimage.measurements.center_of_mass(mask.numpy()) for mask in gt_masks_raw]
 
-        for i in range(len(featmap_sizes)):
+        for i in range(len(self.seg_num_grids)):
             cate_label = torch.zeros((self.seg_num_grids[i],self.seg_num_grids[i]))
-            ins_label = torch.zeros((self.seg_num_grids[i]**2,featmap_sizes[0],featmap_sizes[1]))
-            ins_ind_label_list = torch.zeros(self.seg_num_grids[i]**2)
+            ins_label = torch.zeros((self.seg_num_grids[i]**2,featmap_sizes[i][0],featmap_sizes[i][1]))
+            ins_ind_label = torch.zeros(self.seg_num_grids[i]**2)
 
             scale_range = self.scale_ranges[i]
 
             #check object scale
-            idx = torch.where(scale > scale_range[0] & scale < scale_range[1])
+            idx = torch.where(scale_range[0] < scale < scale_range[1])
+
+
             print('idx',idx)
-            if not idx:
+            if len(idx[0])==0:
+                cate_label_list.append(cate_label)
+                ins_label_list.append(ins_label)
+                ins_ind_label_list.append(ins_ind_label)
                 continue
-            center = np.asarray(center_list[idx])
+            labels = gt_labels_raw[idx]
+            ins_layers = gt_masks_raw[idx]
+
+            center = torch.Tensor(center_list[idx[0]]).view(-1,2)
             center_x = center[:,0]
             center_y = center[:,1]
             w *= 0.2
             h *= 0.2
 
-            x_tl = center_x - w/2
-            y_tl = center_y + h/2
+            x_tl = center_x - w/2 # shape(#obj, 1)
+            y_tl = center_y - h/2
             x_br = center_x + w/2
-            y_br = center_y  - h/2
+            y_br = center_y + h/2
 
-            x_tl_grid = x_tl/(800/self.seg_num_grids)
-            y_tl_grid = y_tl/(1088/self.seg_num_grids)
-            x_br_grid = x_br/(800/self.seg_num_grids)
-            y_br_grid = y_br/(1088/self.seg_num_grids)
+            x_tl_grid = x_tl//(800//self.seg_num_grids[i])
+            y_tl_grid = y_tl//(1088//self.seg_num_grids[i])
+            x_br_grid = x_br//(800//self.seg_num_grids[i])
+            y_br_grid = y_br//(1088//self.seg_num_grids[i])
 
-            center_x /= 800/self.seg_num_grids
-            center_y /= 1088/self.seg_num_grids
+            center_x /= 800/self.seg_num_grids[i]
+            center_y /= 1088/self.seg_num_grids[i]
 
-            x_dim = x_br_grid-x_tl_grid
+            x_dim = x_br_grid - x_tl_grid   # shape(#obj, 1)
             y_dim = y_br_grid - y_tl_grid
+            zero_msk = torch.zeros((self.seg_num_grids[i], self.seg_num_grids[i]))
+            for k in range(len(x_tl_grid)):
+                # creat cate_label
+                cate_label[int(x_tl_grid[k]):int(x_br_grid[k])+1,
+                           int(y_tl_grid[k]):int(y_br_grid[k])+1] = labels[k]
+
+                zero_msk[int(center_x[k])-1:int(center_x[k])+2,
+                         int(center_y[k])-1:int(center_y[k])+2] = 1
+
+            cate_label *= zero_msk
+            cate_label_list.append(cate_label)
+
+            # create ins_label
+            for k in range(len(labels)):
+                channel_inds = (cate_label==labels[k]).nonzero()
+                channels = channel_inds[:,0] * self.seg_num_grids[i] + channel_inds[:,1]
+
+                ins_layer = torch.unsqueeze(ins_layers[k], 0)
+                ins_layer = F.interpolate(ins_layer, size=featmap_sizes[i][1])
+                ins_layer = ins_layer.permute(0, 2, 1)
+                ins_layer = F.interpolate(ins_layer, size=featmap_sizes[i][0])
+                ins_layer = ins_layer.permute(0, 2, 1)
+
+                ins_label[channels, :, :] = ins_layer[0]
+                ins_ind_label[channels] = 1
+            ins_label_list.append(ins_label)
+            ins_ind_label_list.append(ins_ind_label)
+
 
             #testssss
              #centr index in feature map
-
-
-
-
-
-        ins_label_list = []
-        ins_ind_label_list = []
-        cate_label_list = []
-
 
         # check flag
         assert ins_label_list[1].shape == (1296,200,272)
