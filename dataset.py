@@ -179,7 +179,7 @@ if __name__ == '__main__':
             ### Display the image ###
             ax.imshow(np.squeeze(im))
             plt.show()
-            print(label[i].shape,mask[i].shape,bbox[i].shape)
+            # print(label[i].shape,mask[i].shape,bbox[i].shape)
 
         if iter == 1:
             break

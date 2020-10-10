@@ -92,7 +92,7 @@ class SOLOHead(nn.Module):
         self.ins_out = nn.ModuleList()
         for num_grid in self.seg_num_grids:
             conv_out = nn.Sequential(
-                nn.Conv2d(256, num_grid **2,kernel_size=1, padding=1,bias=True),
+                nn.Conv2d(256, num_grid **2,kernel_size=1,bias=True),
                 nn.Sigmoid()
             )
             self.ins_out.append(conv_out)
@@ -144,7 +144,14 @@ class SOLOHead(nn.Module):
         new_fpn_list = self.NewFPN(fpn_feat_list)  # stride[8,8,16,32,32]
         assert new_fpn_list[0].shape[1:] == (256,100,136)
         quart_shape = [new_fpn_list[0].shape[-2]*2, new_fpn_list[0].shape[-1]*2]  # stride: 4
-        # TODO: use MultiApply to compute cate_pred_list, ins_pred_list. Parallel w.r.t. feature level.
+        # TODO-Done: use MultiApply to compute cate_pred_list, ins_pred_list. Parallel w.r.t. feature level.
+        for i in new_fpn_list:
+            print(i.shape)
+        cate_pred_list, ins_pred_list =\
+            self.MultiApply(self.forward_single_level,
+            new_fpn_list, list(range(len(new_fpn_list))), eval=eval,
+            upsample_shape=quart_shape)
+
         assert len(new_fpn_list) == len(self.seg_num_grids)
 
         # assert cate_pred_list[1].shape[1] == self.cate_out_channels
@@ -180,17 +187,49 @@ class SOLOHead(nn.Module):
             # ins_pred: (bz, S^2, Ori_H/4, Ori_W/4) / after upsampling
     def forward_single_level(self, fpn_feat, idx, eval=False, upsample_shape=None):
         # upsample_shape is used in eval mode
-        ## TODO: finish forward function for single level in FPN.
+        ## TODO-Done: finish forward function for single level in FPN.
         ## Notice, we distinguish the training and inference.
         cate_pred = fpn_feat
         ins_pred = fpn_feat
         num_grid = self.seg_num_grids[idx]  # current level grid
 
+        # resize input to  (b, 256, S,S)
+        cate_pred = F.interpolate(fpn_feat, size=(num_grid, num_grid))
+
+        # forward process for cate branch
+        for cate_conv_layer in self.cate_head:
+            cate_pred = cate_conv_layer(cate_pred)
+        cate_pred = self.cate_out(cate_pred) # output prediction: (b,(C-1), S, S)
+
+        # concatenate 2 normalized meshgrid x,y
+        w = fpn_feat.size()[2]
+        h = fpn_feat.size()[3]
+        tensor_w = ((torch.arange(0, w) / w ) - 0.5) * 2
+        tensor_h = ((torch.arange(0, h) / h) - 0.5) * 2
+
+        mesh_w, mesh_h = torch.meshgrid(tensor_w, tensor_h)
+
+        mesh_layers = torch.ones([2,2,w,h])
+        mesh_layers[:, 0, :, :] = mesh_layers[:, 0, :, :] * mesh_w
+        mesh_layers[:, 1, :, :] = mesh_layers[:, 1, :, :] * mesh_h
+
+        ins_pred = torch.cat((ins_pred, mesh_layers),1) # shape (2, 258, w. h)
+
+
+        # forward process for ins branch
+        for ins_conv_layer in self.ins_head:
+            ins_pred = ins_conv_layer(ins_pred)
+        ins_pred = self.ins_out[idx](ins_pred) # output size: (bz, S^2, H_feat, W_feat)
+
+        # sample output to (bz, S^2, 2H_feat, 2W_feat)
+        ins_pred = F.interpolate(ins_pred, scale_factor=2) # expected shape [bz,S^2, 2w, 2h]
+
+
         # in inference time, upsample the pred to (ori image size/4)
         if eval == True:
-            ## TODO resize ins_pred
-
+            ## TODO - Done resize ins_pred
             cate_pred = self.points_nms(cate_pred).permute(0,2,3,1)
+            ins_pred = F.interpolate(ins_pred, size=upsample_shape)
 
         # check flag
         if eval == False:
@@ -450,5 +489,6 @@ if __name__ == '__main__':
                                                                          mask_list)
         mask_color_list = ["jet", "ocean", "Spectral"]
         solo_head.PlotGT(ins_gts_list,ins_ind_gts_list,cate_gts_list,mask_color_list,img)
+        exit()
 
 
