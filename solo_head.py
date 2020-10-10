@@ -352,6 +352,13 @@ class SOLOHead(nn.Module):
         # compute the area of every object in this single image
 
         # initial the output list, each entry for one featmap
+
+
+
+        w = torch.abs(gt_bboxes_raw[:,0] - gt_bboxes_raw[:,2])
+        h = torch.abs(gt_bboxes_raw[:,1] - gt_bboxes_raw[:,1])
+
+        scale = torch.sqrt(w*h)
         ins_label_list = []
         ins_ind_label_list = []
         cate_label_list = []
