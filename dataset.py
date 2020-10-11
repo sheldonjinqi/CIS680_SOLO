@@ -140,10 +140,10 @@ if __name__ == '__main__':
     paths = [imgs_path, masks_path, labels_path, bboxes_path]
     # load the data into data.Dataset
     dataset = BuildDataset(paths)
-    print(dataset.imgs_data.shape)
-    print(dataset.labels_data[:2])
+    # print(dataset.imgs_data.shape)
+    # print(dataset.labels_data[:2])
     # print(dataset.masks_data.shape)
-    print(dataset.bboxes_data.shape)
+    # print(dataset.bboxes_data.shape)
     ## Visualize debugging
     # --------------------------------------------
     # build the dataloader

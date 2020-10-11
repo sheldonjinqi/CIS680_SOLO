@@ -145,10 +145,10 @@ class SOLOHead(nn.Module):
         new_fpn_list = self.NewFPN(fpn_feat_list)  # stride[8,8,16,32,32]
         assert new_fpn_list[0].shape[1:] == (256,100,136)
         quart_shape = [new_fpn_list[0].shape[-2]*2, new_fpn_list[0].shape[-1]*2]  # stride: 4
-        print('quart_shape',quart_shape)
+        # print('quart_shape',quart_shape)
         # TODO-Done: use MultiApply to compute cate_pred_list, ins_pred_list. Parallel w.r.t. feature level.
-        for i in new_fpn_list:
-            print(i.shape)
+        # for i in new_fpn_list:
+        #     print(i.shape)
         cate_pred_list, ins_pred_list =\
             self.MultiApply(self.forward_single_level,
             new_fpn_list, list(range(len(new_fpn_list))), eval=eval,
@@ -169,7 +169,7 @@ class SOLOHead(nn.Module):
     # new_fpn_list, list, len(FPN), stride[8,8,16,32,32]
     def NewFPN(self, fpn_feat_list):
         #downsample the corsest feature map
-        fpn_feat_list[0] = F.interpolate(fpn_feat_list[0],scale_factor=0.5)
+        fpn_feat_list[0] = F.interpolate(fpn_feat_list[0],scale_factor=0.5,mode='bilinear')
         #upsample the finest feature map
         fpn_feat_list[-1] = F.interpolate(fpn_feat_list[-1],size=(25,34))
         return fpn_feat_list
@@ -198,6 +198,9 @@ class SOLOHead(nn.Module):
         # resize input to  (b, 256, S,S)
         cate_pred = F.interpolate(fpn_feat, size=(num_grid, num_grid))
 
+        # print('cate shape', cate_pred.shape)
+        # print(ins_pred.shape)
+        # exit()
         # forward process for cate branch
         for cate_conv_layer in self.cate_head:
             cate_pred = cate_conv_layer(cate_pred)
@@ -213,8 +216,10 @@ class SOLOHead(nn.Module):
         tensor_h = ((torch.arange(0, h) / float(h)) - 0.5) * 2
 
         mesh_w, mesh_h = torch.meshgrid(tensor_w, tensor_h)
+        # should the first index be batch size?
+        # mesh_layers = torch.ones([2,2,w,h])
+        mesh_layers = torch.ones([cate_pred.shape[0], 2, w, h])
 
-        mesh_layers = torch.ones([2,2,w,h])
         mesh_layers[:, 0, :, :] = mesh_layers[:, 0, :, :] * mesh_w
         mesh_layers[:, 1, :, :] = mesh_layers[:, 1, :, :] * mesh_h
 
@@ -357,32 +362,32 @@ class SOLOHead(nn.Module):
         cate_label_list = []
 
         # initial the output list, each entry for one featmap
+
         w = torch.abs(gt_bboxes_raw[:,0] - gt_bboxes_raw[:,2])
         h = torch.abs(gt_bboxes_raw[:,3] - gt_bboxes_raw[:,1])
-
         scale = torch.sqrt(w * h)
-        center_list = [ndimage.measurements.center_of_mass(mask.numpy()) for mask in gt_masks_raw]
+        center_list = np.asarray([ndimage.measurements.center_of_mass(mask.numpy()) for mask in gt_masks_raw])
 
+        #go through each layer of feature pyramid
         for i in range(len(self.seg_num_grids)):
             cate_label = torch.zeros((self.seg_num_grids[i],self.seg_num_grids[i]))
             ins_label = torch.zeros((self.seg_num_grids[i]**2,featmap_sizes[i][0],featmap_sizes[i][1]))
             ins_ind_label = torch.zeros(self.seg_num_grids[i]**2)
-
             scale_range = self.scale_ranges[i]
 
             #check object scale
-            idx = torch.where(scale_range[0] < scale < scale_range[1])
+            #changed single expression to double to handle multiple object case
+            idx = torch.where((scale_range[0] < scale)  &( scale< scale_range[1]))[0].tolist()
 
 
-            if len(idx[0])==0:
+            if len(idx)==0:
                 cate_label_list.append(cate_label)
                 ins_label_list.append(ins_label)
                 ins_ind_label_list.append(ins_ind_label)
                 continue
             labels = gt_labels_raw[idx]
             ins_layers = gt_masks_raw[idx]
-
-            center = torch.Tensor(center_list[idx[0]]).view(-1,2)
+            center = torch.Tensor(center_list[idx]).view(-1,2)
             center_x = center[:,0]
             center_y = center[:,1]
             w *= 0.2
@@ -401,39 +406,42 @@ class SOLOHead(nn.Module):
             center_x /= 800/self.seg_num_grids[i]
             center_y /= 1088/self.seg_num_grids[i]
 
-            x_dim = x_br_grid - x_tl_grid   # shape(#obj, 1)
-            y_dim = y_br_grid - y_tl_grid
-            zero_msk = torch.zeros((self.seg_num_grids[i], self.seg_num_grids[i]))
-            for k in range(len(x_tl_grid)):
-                # creat cate_label
-                cate_label[int(x_tl_grid[k]):int(x_br_grid[k])+1,
-                           int(y_tl_grid[k]):int(y_br_grid[k])+1] = labels[k]
 
+            zero_msk = torch.zeros((self.seg_num_grids[i], self.seg_num_grids[i]))
+
+            # print('num of objects in this layer', len(idx))
+            # print('object label', labels)
+            # print('ins_layers', ins_layers.shape)
+
+            #loop through each object thats falls in the range for cate_label
+            for k in range(len(labels)):
+                # creat cate_label
+                temp_cate_label = torch.zeros_like(cate_label)
+                temp_cate_label[int(x_tl_grid[k]):int(x_br_grid[k])+1,
+                           int(y_tl_grid[k]):int(y_br_grid[k])+1] = labels[k]
+                cate_label[temp_cate_label > 0 ] = labels[k]
                 zero_msk[int(center_x[k])-1:int(center_x[k])+2,
                          int(center_y[k])-1:int(center_y[k])+2] = 1
 
+                channel_inds = (temp_cate_label == labels[k]).nonzero()
+                channels = channel_inds[:,0] * self.seg_num_grids[i] + channel_inds[:,1]
+                ins_layer = ins_layers[k]  #assign corresponding mask
+                ins_layer = ins_layer.expand(1,1,ins_layer.shape[0],ins_layer.shape[1])
+                ins_layer = F.interpolate(ins_layer, size = featmap_sizes[i],mode='bilinear')
+                ins_layer = torch.squeeze(ins_layer)
+                ins_layer[ins_layer > 0] = 1
+                ins_layer = torch.clamp(ins_layer, 0, 1)
+                # check this line why index 0  ?
+                ins_label[channels, :, :] = ins_layer
+                ins_ind_label[channels] = 1
+
+            # turn off grids outside 3x3
             cate_label *= zero_msk
             cate_label_list.append(cate_label)
 
-            # create ins_label
-            for k in range(len(labels)):
-                channel_inds = (cate_label==labels[k]).nonzero()
-                channels = channel_inds[:,0] * self.seg_num_grids[i] + channel_inds[:,1]
 
-                ins_layer = torch.unsqueeze(ins_layers[k], 0)
-                ins_layer = F.interpolate(ins_layer, size=featmap_sizes[i][1])
-                ins_layer = ins_layer.permute(0, 2, 1)
-                ins_layer = F.interpolate(ins_layer, size=featmap_sizes[i][0])
-                ins_layer = ins_layer.permute(0, 2, 1)
-
-                ins_label[channels, :, :] = ins_layer[0]
-                ins_ind_label[channels] = 1
             ins_label_list.append(ins_label)
             ins_ind_label_list.append(ins_ind_label)
-
-
-            #testssss
-             #centr index in feature map
 
         # check flag
         assert ins_label_list[1].shape == (1296,200,272)
@@ -511,33 +519,37 @@ class SOLOHead(nn.Module):
         for i in range(len(ins_gts_list)):
             #loop through all featurn pyramid layers:
             for j in range(len(ins_gts_list[i])):
-                # msk = np.ma.masked_where(msk == 0 , msk)
                 fig, ax = plt.subplots(1)
                 image = img[i]
                 image = image.permute(1,2,0)
                 ax.imshow(image)
-
                 for k in range(3):
                     color = color_list[k]
                     k = k + 1
                     idx = torch.where(cate_gts_list[i][j] == k)
+
                     if len(idx[0]) == 0:
                         continue
                     flat_idx = idx[0]*self.seg_num_grids[j] + idx[1]
                     msk_list = ins_gts_list[i][j][flat_idx]
-                    for msk in msk_list:
-                        msk = torch.unsqueeze(msk, 0)
-                        msk = F.interpolate(msk, size= image.shape[1])
-                        msk = msk.permute(0, 2, 1)
-                        msk = F.interpolate(msk, size= image.shape[0])
-                        msk = msk.permute(0, 2, 1)
-                        msk = np.squeeze(msk)
-                        msk = np.ma.masked_where(msk == 0, msk)
-                        ax.imshow(msk, color, interpolation='none')
-                fig.savefig("./testfig/gt_visualization_fp"+str(j)+"_"+str(i)+".png" )
-                plt.show()
 
+                    for msk in msk_list:
+
+                        #4d bilinear interpolation, upsasmpling to original size
+                        msk = msk.expand(1,1,msk.shape[0],msk.shape[1])
+                        msk = F.interpolate(msk, size=(image.shape[0],image.shape[1]), mode='bilinear')
+                        msk = torch.squeeze(msk)
+                        #clipping and set msk data to binary as the original format
+                        msk[msk > 0] = 1
+                        msk = torch.clamp(msk,0,1)
+                        msk = np.ma.masked_where(msk == 0, msk)
+                        #alpha set to 1.0 for color consistence, multiple grid activated would have solider color
+                        ax.imshow(msk, color, interpolation='none',alpha=1.0)
+
+
+                # fig.savefig("./testfig/gt_visualization_fp"+str(i)+"_"+str(j)+".png" )
                 # plt.show()
+
         pass
 
     # This function plot the inference segmentation in img
@@ -583,7 +595,7 @@ if __name__ == '__main__':
 
     # train_loader = DataLoader(train_dataset, batch_size=2, shuffle=True, num_workers=0)
     # test_loader = DataLoader(test_dataset, batch_size=2, shuffle=False, num_workers=0)
-    batch_size = 2
+    batch_size = 8
     train_build_loader = BuildDataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
     train_loader = train_build_loader.loader()
     test_build_loader = BuildDataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=0)
@@ -610,6 +622,26 @@ if __name__ == '__main__':
                                                                          mask_list)
         mask_color_list = ["jet", "ocean", "Spectral"]
         solo_head.PlotGT(ins_gts_list,ins_ind_gts_list,cate_gts_list,mask_color_list,img)
-        exit()
 
+
+
+        #compare with raw label result
+        # for i in range(batch_size):
+        #     image = img[i]
+        #     image = image.permute(1, 2, 0)
+        #     fig, ax = plt.subplots(1)
+        #     ### Display the image ###
+        #     ax.imshow(np.squeeze(image))
+        #
+        #     # plot mask
+        #
+        #     for j, msk in enumerate(mask_list[i]):
+        #         cls = label_list[i][j]-1
+        #         msk = np.ma.masked_where(msk == 0, msk)
+        #         plt.imshow(msk, mask_color_list[int(cls)], interpolation='none', alpha=0.7)
+        #
+        #     # plt.savefig("./testfig/visualtrainset"+str(iter)+"_"+ str(i)+".png")
+        #     plt.show()
+
+        exit()
 
