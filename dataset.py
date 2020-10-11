@@ -65,11 +65,11 @@ class BuildDataset(torch.utils.data.Dataset):
         img=F.interpolate(img, size=800)
         img=img.permute(0, 2, 1)
         #normalize each channel
-        print('mean before preprocess',torch.mean(img,(1,2)),torch.std(img,(1,2)))
+        # print('mean before preprocess',torch.mean(img,(1,2)),torch.std(img,(1,2)))
         normalize = transforms.Normalize((0.485,0.456,0.406),(0.229,0.224,0.225),inplace = False)
         img = normalize(img)
         img = F.pad(img, (11, 11))
-        print('max after preprocess', torch.max(img))
+        # print('max after preprocess', torch.max(img))
 
         # same process to mask
         mask = F.interpolate(mask, size=1066)
@@ -78,6 +78,8 @@ class BuildDataset(torch.utils.data.Dataset):
         mask = mask.permute(0, 2, 1)
         mask = F.pad(mask, (11, 11))
 
+
+        #what is this?
         bbox = bbox * 8/3
         bbox[:,0] += 11
         bbox[:,2] += 11
@@ -155,7 +157,7 @@ if __name__ == '__main__':
     train_dataset, test_dataset = torch.utils.data.random_split(dataset, [train_size, test_size])
 
     # push the randomized training data into the dataloader
-    batch_size = 2
+    batch_size = 5
     train_build_loader = BuildDataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
     train_loader = train_build_loader.loader()
     test_build_loader = BuildDataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=0)
@@ -165,7 +167,7 @@ if __name__ == '__main__':
     # loop the image
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     for iter, data in enumerate(train_loader, 0):
-        print(len([data[i] for i in range(len(data))]))
+        # print(len([data[i] for i in range(len(data))]))
         img, label, mask, bbox = [data[i] for i in range(len(data))]
         # check flag
         assert img.shape == (batch_size, 3, 800, 1088)
@@ -192,7 +194,7 @@ if __name__ == '__main__':
             # plot bounding box
             for box in bbox[i]:
                 # Create a Rectangle patch
-                print(box)
+                # print(box)
                 x,y = box[0], box[1]
                 w = (box[2]-box[0])
                 h = (box[3]-box[1])
@@ -202,15 +204,19 @@ if __name__ == '__main__':
                 ax.add_patch(rect)
 
             # plot mask
+            print('image: ',i)
+            print('num of mask', len(mask[i]))
             for j,msk in enumerate(mask[i]):
                 cls = label[i][j]
+                print(cls)
                 msk = np.ma.masked_where(msk == 0, msk)
+                print(msk.shape)
                 plt.imshow(msk, mask_color_list[int(cls)], interpolation='none', alpha=0.7)
 
             # plt.savefig("./testfig/visualtrainset"+str(iter)+"_"+ str(i)+".png")
             plt.show()
             # print(label[i].shape,mask[i].shape,bbox[i].shape)
 
-        if iter == 2:
+        if iter == 0:
             break
 

@@ -319,6 +319,7 @@ class SOLOHead(nn.Module):
         # TODO: use MultiApply to compute ins_gts_list, ins_ind_gts_list, cate_gts_list. Parallel w.r.t. img mini-batch
 
         # remember, you want to construct target of the same resolution as prediction output in training
+
         featmap_sizes = [[(featmap.shape[2],featmap.shape[3]) for featmap in ins_pred_list ]] * len(mask_list)
         ins_gts_list, ins_ind_gts_list, cate_gts_list = self.MultiApply(self.targer_single_img, \
                                                                               bbox_list, label_list,
@@ -373,7 +374,6 @@ class SOLOHead(nn.Module):
             idx = torch.where(scale_range[0] < scale < scale_range[1])
 
 
-            print('idx',idx)
             if len(idx[0])==0:
                 cate_label_list.append(cate_label)
                 ins_label_list.append(ins_label)
@@ -505,6 +505,39 @@ class SOLOHead(nn.Module):
                img):
         ## TODO: target image recover, for each image, recover their segmentation in 5 FPN levels.
         ## This is an important visual check flag.
+
+        # print(len(img))
+        #loop through imgs in one batch
+        for i in range(len(ins_gts_list)):
+            #loop through all featurn pyramid layers:
+            for j in range(len(ins_gts_list[i])):
+                # msk = np.ma.masked_where(msk == 0 , msk)
+                fig, ax = plt.subplots(1)
+                image = img[i]
+                image = image.permute(1,2,0)
+                ax.imshow(image)
+
+                for k in range(3):
+                    color = color_list[k]
+                    k = k + 1
+                    idx = torch.where(cate_gts_list[i][j] == k)
+                    if len(idx[0]) == 0:
+                        continue
+                    flat_idx = idx[0]*self.seg_num_grids[j] + idx[1]
+                    msk_list = ins_gts_list[i][j][flat_idx]
+                    for msk in msk_list:
+                        msk = torch.unsqueeze(msk, 0)
+                        msk = F.interpolate(msk, size= image.shape[1])
+                        msk = msk.permute(0, 2, 1)
+                        msk = F.interpolate(msk, size= image.shape[0])
+                        msk = msk.permute(0, 2, 1)
+                        msk = np.squeeze(msk)
+                        msk = np.ma.masked_where(msk == 0, msk)
+                        ax.imshow(msk, color, interpolation='none')
+                fig.savefig("./testfig/gt_visualization_fp"+str(j)+"_"+str(i)+".png" )
+                plt.show()
+
+                # plt.show()
         pass
 
     # This function plot the inference segmentation in img
