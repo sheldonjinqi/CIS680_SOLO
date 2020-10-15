@@ -536,6 +536,17 @@ class SOLOHead(nn.Module):
                     ori_size):
 
         ## TODO: finish PostProcess
+
+        ## NOT FINISHED !!!
+        ins_pred_list = [torch.cat([ins_preds_level_img[ins_ind_labels_level_img.type(torch.long), ...]
+                                for ins_preds_level_img, ins_ind_labels_level_img in
+                                zip(ins_preds_level, ins_ind_labels_level)], 0)
+                     for ins_preds_level, ins_ind_labels_level in
+                     zip(ins_pred_list, zip(*ins_ind_gts_list))]
+        cate_pred_list = [cate_pred_level.reshape(-1, self.cate_out_channels)
+                      for cate_pred_level in cate_pred_list]
+        cate_pred_list = torch.cat(cate_pred_list, 0)
+
         pass
 
 
@@ -547,12 +558,32 @@ class SOLOHead(nn.Module):
         # NMS_sorted_scores_list, list, len(bz), (keep_instance,)
         # NMS_sorted_cate_label_list, list, len(bz), (keep_instance,)
         # NMS_sorted_ins_list, list, len(bz), (keep_instance, ori_H, ori_W)
+
     def PostProcessImg(self,
                        ins_pred_img,
                        cate_pred_img,
                        ori_size):
 
         ## TODO: PostProcess on single image.
+        cate_thresh_idx = torch.where(cate_pred_img > self.postprocess_cfg.get('cate_thresh'))
+        ins_thresh_idx = torch.where(ins_pred_img > self.postprocess_cfg.get('ins_thresh'))
+        cate_pred_img = cate_pred_img[cate_thresh_idx]
+        ins_pred_img = ins_pred_img[cate_thresh_idx]
+
+        c_max = torch.max(cate_pred_img,dim=1) #maximum category prediction for each cell
+        indicator_fc = torch.ones_like(ins_pred_img)
+        indicator_fc[ins_thresh_idx] = 1
+
+        #vectorized, check the shape of each term, could be bug here!
+        mask_score = torch.sum(ins_pred_img * indicator_fc, dim =(-1,-2)) / torch.sum(indicator_fc, dim=(-1,-2)) * c_max
+
+        # not sure why these should be list of len(bz), asked on piazza, double check !
+        sorted_mask_score, sort_idx = torch.sort(mask_score,descending= True)
+        sorted_cate_pred = cate_pred_img[sort_idx]
+        sorted_ins_pred = ins_pred_img[sort_idx]
+
+        return sorted_mask_score, sorted_cate_pred, sorted_ins_pred
+
         pass
 
     # This function perform matrix NMS
