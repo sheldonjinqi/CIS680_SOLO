@@ -443,7 +443,7 @@ class SOLOHead(nn.Module):
         for i in range(len(self.seg_num_grids)):
             cate_label = torch.zeros((self.seg_num_grids[i],self.seg_num_grids[i]))
             ins_label = torch.zeros((self.seg_num_grids[i]**2,featmap_sizes[i][0],featmap_sizes[i][1]))
-            ins_ind_label = torch.zeros(self.seg_num_grids[i]**2)
+            ins_ind_label = torch.zeros(self.seg_num_grids[i]**2,dtype=torch.bool)
             scale_range = self.scale_ranges[i]
 
             #check object scale
@@ -504,7 +504,7 @@ class SOLOHead(nn.Module):
                 ins_layer = torch.clamp(ins_layer, 0, 1)
                 # check this line why index 0  ?
                 ins_label[channels, :, :] = ins_layer
-                ins_ind_label[channels] = 1
+                ins_ind_label[channels] = True
 
             # turn off grids outside 3x3
             cate_label *= zero_msk
