@@ -277,6 +277,54 @@ class SOLOHead(nn.Module):
              ins_ind_gts_list,
              cate_gts_list):
         ## TODO: compute loss, vecterize this part will help a lot. To avoid potential ill-conditioning, if necessary, add a very small number to denominator for focalloss and diceloss computation.
+
+        ## uniform the expression for ins_gts & ins_preds
+        #following code are provided in the pdf instruction
+        # for ins_labels_level, ins_ind_labels_level in zip(zip(*ins_gts_list), zip(*ins_ind_gts_list)):
+        #     for ins_labels_level_img, ins_ind_labels_level_img in zip(ins_labels_level, ins_ind_labels_level):
+        #         print(ins_labels_level_img.shape)
+        #         print(ins_ind_labels_level_img.shape)
+        #         print(ins_ind_labels_level_img.dtype)
+        #         print(ins_labels_level_img[ins_ind_labels_level_img.type(torch.long)].shape)
+        #         exit()
+        ins_gts = [torch.cat([ins_labels_level_img[ins_ind_labels_level_img.type(torch.long), ...]
+                              for ins_labels_level_img, ins_ind_labels_level_img in
+                              zip(ins_labels_level, ins_ind_labels_level)], 0)
+                   for ins_labels_level, ins_ind_labels_level in
+                   zip(zip(*ins_gts_list), zip(*ins_ind_gts_list))]
+        ## ins_gts: fpn x batch_size * s^2 x 2H_feat x 2W_feat
+        ins_preds = [torch.cat([ins_preds_level_img[ins_ind_labels_level_img.type(torch.long), ...]
+                                for ins_preds_level_img, ins_ind_labels_level_img in
+                                zip(ins_preds_level, ins_ind_labels_level)], 0)
+                     for ins_preds_level, ins_ind_labels_level in
+                     zip(ins_pred_list, zip(*ins_ind_gts_list))]
+        ## ins_gts: fpn x batch_size * s^2 x 2H_feat x 2W_feat
+
+
+        ## uniform the expression for cate_gts & cate_preds
+        # cate_gts: (bz*fpn*S^2,), img, fpn, grids
+        # cate_preds: (bz*fpn*S^2, C-1), ([img, fpn, grids], C-1)
+        cate_gts = [torch.cat([cate_gts_level_img.flatten()
+                               for cate_gts_level_img in cate_gts_level])
+                    for cate_gts_level in zip(*cate_gts_list)]
+        cate_gts = torch.cat(cate_gts)
+        cate_preds = [cate_pred_level.permute(0, 2, 3, 1).reshape(-1, self.cate_out_channels)
+                      for cate_pred_level in cate_pred_list]
+        cate_preds = torch.cat(cate_preds, 0)
+
+        #cate_gts: (N,)
+        #cate_preds: (N,3)
+
+        cate_loss = self.FocalLoss(cate_preds,cate_gts)
+        num_fpn = len(ins_gts)
+
+        dice_loss_sum = 0
+        N_total = 0
+        #assuming activated grid cells have been picked out using TA's code, could be wrong
+        for i in range(num_fpn):
+            dice_loss_sum += self.DiceLoss(ins_preds[i],ins_gts[i])
+            N_total += ins_preds[i].shape[0]
+        mask_loss = dice_loss_sum / N_total
         pass
 
 
@@ -285,10 +333,21 @@ class SOLOHead(nn.Module):
     # Input:
         # mask_pred: (2H_feat, 2W_feat)
         # mask_gt: (2H_feat, 2W_feat)
+    # changed the input to fpn x batch_size * s^2 x 2H_feat x 2W_feat for vectorization
     # Output: dice_loss, scalar
     def DiceLoss(self, mask_pred, mask_gt):
         ## TODO: compute DiceLoss
-        pass
+        # N_total = mask_pred.shape[0]
+        # for i in range(len(mask_pred)):
+        #     N_total += mask_pred[i].shape[0]
+        #     print('mask_pred',mask_pred[i].shape)
+        #     print('mask_gt',mask_gt[i].shape)
+        # print('N_total',N_total)
+        dice_loss = 2 * torch.sum(mask_pred * mask_gt,dim=(-1,-2)) / (torch.sum(mask_pred ** 2,dim=(-1,-2)) + torch.sum(mask_gt ** 2,dim=(-1,-2)) + 1e-5)  #added 1e-5 to prevent devide by 0
+        dice_loss = 1 - dice_loss
+        dice_loss = torch.sum(dice_loss)
+        return dice_loss
+
 
     # This function compute the cate loss
     # Input:
@@ -297,6 +356,18 @@ class SOLOHead(nn.Module):
     # Output: focal_loss, scalar
     def FocalLoss(self, cate_preds, cate_gts):
         ## TODO: compute focalloss
+        expanded_cate_gts = torch.zeros((len(cate_gts),4))
+        expanded_cate_gts[:,cate_gts.type(torch.long)] = 1 # one hot encoding
+        flat_cate_gts = expanded_cate_gts[:,1:].flatten() #remove the background channel and flatten
+        flat_cate_preds = cate_preds.flatten()
+        total_num = len(flat_cate_preds)
+        alpha = self.cate_loss_cfg.get('alpha')
+        gamma = self.cate_loss_cfg.get('gamma')
+        fl_1 = -alpha * (1-flat_cate_gts[torch.where(flat_cate_gts == 1)] ** gamma ) * torch.log(flat_cate_gts[torch.where(flat_cate_gts == 1)]) # for y_i = 1
+        fl_2 = -(1-alpha) * (flat_cate_gts[torch.where(flat_cate_gts != 1)] ** gamma) * torch.log(1-flat_cate_gts[torch.where(flat_cate_gts != 1)]) # for y_i != 1
+        focal_loss = (torch.sum(fl_1) + torch.sum(fl_2))/total_num
+
+        return focal_loss
         pass
 
     def MultiApply(self, func, *args, **kwargs):
@@ -595,7 +666,7 @@ if __name__ == '__main__':
 
     # train_loader = DataLoader(train_dataset, batch_size=2, shuffle=True, num_workers=0)
     # test_loader = DataLoader(test_dataset, batch_size=2, shuffle=False, num_workers=0)
-    batch_size = 8
+    batch_size = 2 #used 8 for part a
     train_build_loader = BuildDataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
     train_loader = train_build_loader.loader()
     test_build_loader = BuildDataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=0)
@@ -621,8 +692,13 @@ if __name__ == '__main__':
                                                                          label_list,
                                                                          mask_list)
         mask_color_list = ["jet", "ocean", "Spectral"]
+        print('cate_gts_list',cate_gts_list[0][0].shape)
         solo_head.PlotGT(ins_gts_list,ins_ind_gts_list,cate_gts_list,mask_color_list,img)
 
+
+        #testing the loss function here:
+        solo_head.loss(cate_pred_list,ins_pred_list,ins_gts_list,ins_ind_gts_list,cate_gts_list)
+        print('tested loss function')
 
 
         #compare with raw label result
