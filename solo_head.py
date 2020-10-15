@@ -543,9 +543,9 @@ class SOLOHead(nn.Module):
                                 zip(ins_preds_level, ins_ind_labels_level)], 0)
                      for ins_preds_level, ins_ind_labels_level in
                      zip(ins_pred_list, zip(*ins_ind_gts_list))]
-        cate_pred_list = [cate_pred_level.reshape(-1, self.cate_out_channels)
+        cate_pred_list = [torch.flatten(cate_pred_level,start_dim=1,end_dim=2)
                       for cate_pred_level in cate_pred_list]
-        cate_pred_list = torch.cat(cate_pred_list, 0)
+        cate_pred_list = torch.cat(cate_pred_list, 1) #resulting shape (bz,all_level_s^2,c-1)
 
         pass
 
