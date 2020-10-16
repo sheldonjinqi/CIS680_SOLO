@@ -536,17 +536,34 @@ class SOLOHead(nn.Module):
                     ori_size):
 
         ## TODO: finish PostProcess
+        ## finished, needs to be tested, can be vectorized to process entire batch together once tested PostProcessImg
 
-        ## NOT FINISHED !!!
-        ins_pred_list = [torch.cat([ins_preds_level_img[ins_ind_labels_level_img.type(torch.long), ...]
-                                for ins_preds_level_img, ins_ind_labels_level_img in
-                                zip(ins_preds_level, ins_ind_labels_level)], 0)
-                     for ins_preds_level, ins_ind_labels_level in
-                     zip(ins_pred_list, zip(*ins_ind_gts_list))]
-        cate_pred_list = [torch.flatten(cate_pred_level,start_dim=1,end_dim=2)
-                      for cate_pred_level in cate_pred_list]
-        cate_pred_list = torch.cat(cate_pred_list, 1) #resulting shape (bz,all_level_s^2,c-1)
+        # ins_pred_list = [torch.cat([ins_preds_level_img[ins_ind_labels_level_img.type(torch.long), ...]
+        #                         for ins_preds_level_img, ins_ind_labels_level_img in
+        #                         zip(ins_preds_level, ins_ind_labels_level)], 0)
+        #              for ins_preds_level, ins_ind_labels_level in
+        #              zip(ins_pred_list, zip(*ins_ind_gts_list))]
 
+        batch_size = ins_pred_list[0].shape[0]
+        NMS_sorted_scores_list = []
+        NMS_sorted_cate_label_list = []
+        NMS_sorted_ins_list = []
+
+        ins_preds = torch.cat(ins_pred_list,dim=1) #desired output shape: bz, all_level s^2, Ori_H/4, Ori_W/4
+
+
+        cate_preds = [torch.flatten(cate_pred_level,start_dim=1,end_dim=2)
+                      for cate_pred_level in cate_pred_list] #list, len fpn, (bz,s^2, c-1)
+        cate_preds = torch.cat(cate_pred_list, 1) #resulting shape should be  (bz,all_level_s^2,c-1)
+        # loop through images in batch
+        for i in range(batch_size):
+            NMS_sorted_scores, NMS_sorted_cate_label, NMS_sorted_ins = self.PostProcessImg(ins_preds[i],cate_preds[i])
+            NMS_sorted_scores_list.append(NMS_sorted_scores)
+            NMS_sorted_cate_label_list.append(NMS_sorted_cate_label)
+            NMS_sorted_ins_list.append(NMS_sorted_ins)
+
+        assert len(NMS_sorted_scores_list) == batch_size #check output shape
+        return NMS_sorted_scores_list, NMS_sorted_cate_label_list, NMS_sorted_ins_list
         pass
 
 
@@ -565,6 +582,7 @@ class SOLOHead(nn.Module):
                        ori_size):
 
         ## TODO: PostProcess on single image.
+        ## Here the function can be modified to process the entire batch together
         cate_thresh_idx = torch.where(cate_pred_img > self.postprocess_cfg.get('cate_thresh'))
         ins_thresh_idx = torch.where(ins_pred_img > self.postprocess_cfg.get('ins_thresh'))
         cate_pred_img = cate_pred_img[cate_thresh_idx]
