@@ -612,6 +612,31 @@ class SOLOHead(nn.Module):
         # decay_scores: (n_act,)
     def MatrixNMS(self, sorted_ins, sorted_scores, method='gauss', gauss_sigma=0.5):
         ## TODO: finish MatrixNMS
+
+        #compute IOU
+        num_mask = len(sorted_scores)
+        flatten_mask = torch.flatten(sorted_ins,start_dim=1)
+        intersection_mat = flatten_mask @ flatten_mask.T
+        area_mat = torch.sum(flatten_mask, dim=1)
+        union_mat = area_mat + area_mat.T - intersection_mat
+
+        # not sure why this but suggested in pseudocode
+        iou_mat = intersection_mat/union_mat
+        iou_mat = torch.triu(iou_mat,diagonal=1)
+        # alternative approach
+        iou_mat = iou_mat - torch.eye(len(iou_mat)) #shape: n_act x n_act
+        iou_max = torch.max(iou_mat,dim=1).expand(num_mask,num_mask).T # max iou between mask_i and the rest of masks
+
+
+        if method == 'gauss':
+            decay_mat = torch.exp(-(iou_mat ** 2 ) / gauss_sigma)
+        else: #linear function
+            decay_mat = (1-iou_mat) / (1-iou_max)
+
+        #this line is not in psudocode but used to check score condition
+        decay_mat
+        decay = torch.min(decay_mat,dim = 0) #shape: (n_act,)
+        decay_scores = decay * sorted_scores
         pass
 
     # -----------------------------------
