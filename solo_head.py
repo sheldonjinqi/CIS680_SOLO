@@ -325,7 +325,8 @@ class SOLOHead(nn.Module):
             dice_loss_sum += self.DiceLoss(ins_preds[i],ins_gts[i])
             N_total += ins_preds[i].shape[0]
         mask_loss = dice_loss_sum / N_total
-        pass
+
+        return mask_loss
 
 
 
@@ -728,8 +729,8 @@ if __name__ == '__main__':
 
 
         #testing the loss function here:
-        solo_head.loss(cate_pred_list,ins_pred_list,ins_gts_list,ins_ind_gts_list,cate_gts_list)
-        print('tested loss function')
+        loss_test = solo_head.loss(cate_pred_list,ins_pred_list,ins_gts_list,ins_ind_gts_list,cate_gts_list)
+        print('tested loss function',loss_test)
 
 
         #compare with raw label result
