@@ -338,7 +338,7 @@ class SOLOHead(nn.Module):
     # Input:
         # mask_pred: (2H_feat, 2W_feat)
         # mask_gt: (2H_feat, 2W_feat)
-    # changed the input to fpn x batch_size * s^2 x 2H_feat x 2W_feat for vectorization
+    # changed the input to num all activated cells in the batch x 2H_feat x 2W_feat for vectorization
     # Output: dice_loss, scalar
     def DiceLoss(self, mask_pred, mask_gt):
         ## TODO: compute DiceLoss
