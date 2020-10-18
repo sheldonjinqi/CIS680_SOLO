@@ -287,18 +287,23 @@ class SOLOHead(nn.Module):
         #         print(ins_ind_labels_level_img.dtype)
         #         print(ins_labels_level_img[ins_ind_labels_level_img.type(torch.long)].shape)
         #         exit()
-        ins_gts = [torch.cat([ins_labels_level_img[ins_ind_labels_level_img.type(torch.long), ...]
+        ins_gts = [torch.cat([ins_labels_level_img[ins_ind_labels_level_img, ...]
                               for ins_labels_level_img, ins_ind_labels_level_img in
                               zip(ins_labels_level, ins_ind_labels_level)], 0)
                    for ins_labels_level, ins_ind_labels_level in
                    zip(zip(*ins_gts_list), zip(*ins_ind_gts_list))]
-        ## ins_gts: fpn x batch_size * s^2 x 2H_feat x 2W_feat
-        ins_preds = [torch.cat([ins_preds_level_img[ins_ind_labels_level_img.type(torch.long), ...]
+        ## ins_gts: list fpn , num all activated cells in the batch x 2H_feat x 2W_feat
+        # for level in range(5):
+        #     print('ins_gts',ins_gts[level].shape, ' at level', level+1)
+
+        ins_preds = [torch.cat([ins_preds_level_img[ins_ind_labels_level_img, ...]
                                 for ins_preds_level_img, ins_ind_labels_level_img in
                                 zip(ins_preds_level, ins_ind_labels_level)], 0)
                      for ins_preds_level, ins_ind_labels_level in
                      zip(ins_pred_list, zip(*ins_ind_gts_list))]
-        ## ins_gts: fpn x batch_size * s^2 x 2H_feat x 2W_feat
+        # for level in range(5):
+        #     print('ins_preds',ins_preds[level].shape, ' at level', level+1)
+        ## ins_preds: list fpn , num all activated cells in the batch x 2H_feat x 2W_feat
 
 
         ## uniform the expression for cate_gts & cate_preds
@@ -357,18 +362,17 @@ class SOLOHead(nn.Module):
     def FocalLoss(self, cate_preds, cate_gts):
         ## TODO: compute focalloss
         expanded_cate_gts = torch.zeros((len(cate_gts),4))
-        expanded_cate_gts[:,cate_gts.type(torch.long)] = 1 # one hot encoding
+        expanded_cate_gts[range(len(cate_gts)),cate_gts] = 1 # one hot encoding
         flat_cate_gts = expanded_cate_gts[:,1:].flatten() #remove the background channel and flatten
         flat_cate_preds = cate_preds.flatten()
         total_num = len(flat_cate_preds)
         alpha = self.cate_loss_cfg.get('alpha')
         gamma = self.cate_loss_cfg.get('gamma')
-        fl_1 = -alpha * (1-flat_cate_gts[torch.where(flat_cate_gts == 1)] ** gamma ) * torch.log(flat_cate_gts[torch.where(flat_cate_gts == 1)]) # for y_i = 1
-        fl_2 = -(1-alpha) * (flat_cate_gts[torch.where(flat_cate_gts != 1)] ** gamma) * torch.log(1-flat_cate_gts[torch.where(flat_cate_gts != 1)]) # for y_i != 1
-        focal_loss = (torch.sum(fl_1) + torch.sum(fl_2))/total_num
+        fl_1 = -alpha * ((1-flat_cate_preds[torch.where(flat_cate_gts == 1)]) ** gamma ) * torch.log(flat_cate_preds[torch.where(flat_cate_gts == 1)]) # for y_i = 1
+        fl_2 = -(1-alpha) * (flat_cate_preds[torch.where(flat_cate_gts != 1)] ** gamma) * torch.log(1-flat_cate_preds[torch.where(flat_cate_gts != 1)]) # for y_i != 1
 
+        focal_loss = (torch.sum(fl_1) + torch.sum(fl_2))/total_num
         return focal_loss
-        pass
 
     def MultiApply(self, func, *args, **kwargs):
         pfunc = partial(func, **kwargs) if kwargs else func
@@ -621,7 +625,7 @@ class SOLOHead(nn.Module):
         union_mat = area_mat + area_mat.T - intersection_mat
 
         # not sure why this but suggested in pseudocode
-        iou_mat = intersection_mat/union_mat
+        iou_mat = intersection_mat/union_matl
         iou_mat = torch.triu(iou_mat,diagonal=1)
         # alternative approach
         iou_mat = iou_mat - torch.eye(len(iou_mat)) #shape: n_act x n_act
@@ -693,7 +697,7 @@ class SOLOHead(nn.Module):
 
 
                 # fig.savefig("./testfig/gt_visualization_fp"+str(i)+"_"+str(j)+".png" )
-                # plt.show()
+                plt.show()
 
         pass
 
@@ -767,6 +771,7 @@ if __name__ == '__main__':
                                                                          mask_list)
         mask_color_list = ["jet", "ocean", "Spectral"]
         print('cate_gts_list',cate_gts_list[0][0].shape)
+        # print(torch.where(ins_ind_gts_list[0][5] == True))
         solo_head.PlotGT(ins_gts_list,ins_ind_gts_list,cate_gts_list,mask_color_list,img)
 
 
