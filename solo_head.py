@@ -5,11 +5,12 @@ import numpy as np
 from scipy import ndimage
 from dataset import *
 from functools import partial
-import pdb
+# import pdb
 
 class SOLOHead(nn.Module):
     def __init__(self,
                  num_classes,
+                 device='cpu',
                  in_channels=256,
                  seg_feat_channels=256,
                  stacked_convs=7,
@@ -40,6 +41,7 @@ class SOLOHead(nn.Module):
         self.cate_down_pos = cate_down_pos
         self.scale_ranges = scale_ranges
         self.with_deform = with_deform
+        self.device = device
 
         self.mask_loss_cfg = mask_loss_cfg
         self.cate_loss_cfg = cate_loss_cfg
@@ -49,9 +51,9 @@ class SOLOHead(nn.Module):
         self._init_weights()
 
         # check flag
-        assert len(self.ins_head) == self.stacked_convs
-        assert len(self.cate_head) == self.stacked_convs
-        assert len(self.ins_out) == len(self.strides)
+        # assert len(self.ins_head) == self.stacked_convs
+        # assert len(self.cate_head) == self.stacked_convs
+        # assert len(self.ins_out) == len(self.strides)
         pass
 
     # This function build network layer for cate and ins branch
@@ -127,23 +129,24 @@ class SOLOHead(nn.Module):
 
 
 
-
-    # Forward function should forward every levels in the FPN.
-    # this is done by map function or for loop
-    # Input:
-        # fpn_feat_list: backout_list of resnet50-fpn
-    # Output:
-        # if eval = False
-            # cate_pred_list: list, len(fpn_level), each (bz,C-1,S,S)
-            # ins_pred_list: list, len(fpn_level), each (bz, S^2, 2H_feat, 2W_feat)
-        # if eval==True
-            # cate_pred_list: list, len(fpn_level), each (bz,S,S,C-1) / after point_NMS
-            # ins_pred_list: list, len(fpn_level), each (bz, S^2, Ori_H, Ori_W) / after upsampling
     def forward(self,
                 fpn_feat_list,
                 eval=False):
+        '''
+          Forward function should forward every levels in the FPN.
+          this is done by map function or for loop
+          Input:
+              fpn_feat_list: backout_list of resnet50-fpn
+          Output:
+              if eval = False
+                  cate_pred_list: list, len(fpn_level), each (bz,C-1,S,S)
+                  ins_pred_list: list, len(fpn_level), each (bz, S^2, 2H_feat, 2W_feat)
+              if eval==True
+                  cate_pred_list: list, len(fpn_level), each (bz,S,S,C-1) / after point_NMS
+                  ins_pred_list: list, len(fpn_level), each (bz, S^2, Ori_H, Ori_W) / after upsampling
+        '''
         new_fpn_list = self.NewFPN(fpn_feat_list)  # stride[8,8,16,32,32]
-        assert new_fpn_list[0].shape[1:] == (256,100,136)
+        # assert new_fpn_list[0].shape[1:] == (256,100,136)
         quart_shape = [new_fpn_list[0].shape[-2]*2, new_fpn_list[0].shape[-1]*2]  # stride: 4
         # print('quart_shape',quart_shape)
         # TODO-Done: use MultiApply to compute cate_pred_list, ins_pred_list. Parallel w.r.t. feature level.
@@ -154,44 +157,49 @@ class SOLOHead(nn.Module):
             new_fpn_list, list(range(len(new_fpn_list))), eval=eval,
             upsample_shape=quart_shape)
 
-        assert len(new_fpn_list) == len(self.seg_num_grids)
+        # assert len(new_fpn_list) == len(self.seg_num_grids)
 
         # assert cate_pred_list[1].shape[1] == self.cate_out_channels
-        assert ins_pred_list[1].shape[1] == self.seg_num_grids[1]**2
-        assert cate_pred_list[1].shape[2] == self.seg_num_grids[1]
+        # assert ins_pred_list[1].shape[1] == self.seg_num_grids[1]**2
+        # assert cate_pred_list[1].shape[2] == self.seg_num_grids[1]
         return cate_pred_list, ins_pred_list
 
-    # This function upsample/downsample the fpn level for the network
-    # In paper author change the original fpn level resolution
-    # Input:
-        # fpn_feat_list, list, len(FPN), stride[4,8,16,32,64]
-    # Output:
-    # new_fpn_list, list, len(FPN), stride[8,8,16,32,32]
     def NewFPN(self, fpn_feat_list):
+        '''
+          This function upsample/downsample the fpn level for the network
+          In paper author change the original fpn level resolution
+          Input:
+              fpn_feat_list, list, len(FPN), stride[4,8,16,32,64]
+          Output:
+          new_fpn_list, list, len(FPN), stride[8,8,16,32,32]
+        '''
+
         #downsample the corsest feature map
         fpn_feat_list[0] = F.interpolate(fpn_feat_list[0],scale_factor=0.5,mode='bilinear')
         #upsample the finest feature map
         fpn_feat_list[-1] = F.interpolate(fpn_feat_list[-1],size=(25,34))
         return fpn_feat_list
-        pass
 
 
-    # This function forward a single level of fpn_featmap through the network
-    # Input:
-        # fpn_feat: (bz, fpn_channels(256), H_feat, W_feat)
-        # idx: indicate the fpn level idx, num_grids idx, the ins_out_layer idx
-    # Output:
-        # if eval==False
-            # cate_pred: (bz,C-1,S,S)
-            # ins_pred: (bz, S^2, 2H_feat, 2W_feat)
-        # if eval==True
-            # cate_pred: (bz,S,S,C-1) / after point_NMS
-            # ins_pred: (bz, S^2, Ori_H/4, Ori_W/4) / after upsampling
     def forward_single_level(self, fpn_feat, idx, eval=False, upsample_shape=None):
+        '''
+          This function forward a single level of fpn_featmap through the network
+          Input:
+              fpn_feat: (bz, fpn_channels(256), H_feat, W_feat)
+              idx: indicate the fpn level idx, num_grids idx, the ins_out_layer idx
+          Output:
+              if eval==False
+                  cate_pred: (bz,C-1,S,S)
+                  ins_pred: (bz, S^2, 2H_feat, 2W_feat)
+              if eval==True
+                  cate_pred: (bz,S,S,C-1) / after point_NMS
+                  ins_pred: (bz, S^2, Ori_H/4, Ori_W/4) / after upsampling
+        '''
         # upsample_shape is used in eval mode
         ## TODO-Done: finish forward function for single level in FPN.
         ## Notice, we distinguish the training and inference.
-        cate_pred = fpn_feat
+
+        # cate_pred = fpn_feat
         ins_pred = fpn_feat
         num_grid = self.seg_num_grids[idx]  # current level grid
 
@@ -210,15 +218,15 @@ class SOLOHead(nn.Module):
         w = fpn_feat.size()[2]
         h = fpn_feat.size()[3]
 
-
         #normalize x,y to (-1,1)
-        tensor_w = ((torch.arange(0, w) / float(w)) - 0.5) * 2
-        tensor_h = ((torch.arange(0, h) / float(h)) - 0.5) * 2
+        tensor_w = (((torch.arange(0, w) / float(w)) - 0.5) * 2).to(self.device)
+        tensor_h = (((torch.arange(0, h) / float(h)) - 0.5) * 2).to(self.device)
 
         mesh_w, mesh_h = torch.meshgrid(tensor_w, tensor_h)
+        mesh_w, mesh_h = mesh_w.to(self.device), mesh_h.to(self.device)
         # should the first index be batch size?
         # mesh_layers = torch.ones([2,2,w,h])
-        mesh_layers = torch.ones([cate_pred.shape[0], 2, w, h])
+        mesh_layers = torch.ones([cate_pred.shape[0], 2, w, h]).to(self.device)
 
         mesh_layers[:, 0, :, :] = mesh_layers[:, 0, :, :] * mesh_w
         mesh_layers[:, 1, :, :] = mesh_layers[:, 1, :, :] * mesh_h
@@ -226,7 +234,7 @@ class SOLOHead(nn.Module):
         ins_pred = torch.cat((ins_pred, mesh_layers),1) # shape (2, 258, w. h)
 
 
-        # forward process for ins branch
+        # forward process for ins branch, loop over 5 head
         for ins_conv_layer in self.ins_head:
             ins_pred = ins_conv_layer(ins_pred)
         ins_pred = self.ins_out[idx](ins_pred) # output size: (bz, S^2, H_feat, W_feat)
@@ -331,7 +339,8 @@ class SOLOHead(nn.Module):
             N_total += ins_preds[i].shape[0]
         mask_loss = dice_loss_sum / N_total
 
-        return mask_loss
+        # print('cate_loss, mask_loss:', cate_loss, mask_loss)
+        return 3* mask_loss + cate_loss, cate_loss, 3*mask_loss
 
 
 
@@ -349,6 +358,8 @@ class SOLOHead(nn.Module):
         #     print('mask_pred',mask_pred[i].shape)
         #     print('mask_gt',mask_gt[i].shape)
         # print('N_total',N_total)
+
+        mask_pred, mask_gt = mask_pred.to(self.device), mask_gt.to(self.device)
         dice_loss = 2 * torch.sum(mask_pred * mask_gt,dim=(-1,-2)) / (torch.sum(mask_pred ** 2,dim=(-1,-2)) + torch.sum(mask_gt ** 2,dim=(-1,-2)) + 1e-5)  #added 1e-5 to prevent devide by 0
         dice_loss = 1 - dice_loss
         dice_loss = torch.sum(dice_loss)
@@ -363,7 +374,8 @@ class SOLOHead(nn.Module):
     def FocalLoss(self, cate_preds, cate_gts):
         ## TODO: compute focalloss
         expanded_cate_gts = torch.zeros((len(cate_gts),4))
-        expanded_cate_gts[range(len(cate_gts)),cate_gts] = 1 # one hot encoding
+        # print(cate_gts.int())
+        expanded_cate_gts[range(len(cate_gts)),cate_gts.long()] = 1 # one hot encoding
         flat_cate_gts = expanded_cate_gts[:,1:].flatten() #remove the background channel and flatten
         flat_cate_preds = cate_preds.flatten()
         total_num = len(flat_cate_preds)
@@ -381,22 +393,25 @@ class SOLOHead(nn.Module):
 
         return tuple(map(list, zip(*map_results)))
 
-    # This function build the ground truth tensor for each batch in the training
-    # Input:
-        # ins_pred_list: list, len(fpn_level), each (bz, S^2, 2H_feat, 2W_feat)
-        # / ins_pred_list is only used to record feature map
-        # bbox_list: list, len(batch_size), each (n_object, 4) (x1y1x2y2 system)
-        # label_list: list, len(batch_size), each (n_object, )
-        # mask_list: list, len(batch_size), each (n_object, 800, 1088)
-    # Output:
-        # ins_gts_list: list, len(bz), list, len(fpn), (S^2, 2H_f, 2W_f)
-        # ins_ind_gts_list: list, len(bz), list, len(fpn), (S^2,)
-        # cate_gts_list: list, len(bz), list, len(fpn), (S, S), {1,2,3}
+
     def target(self,
                ins_pred_list,
                bbox_list,
                label_list,
                mask_list):
+        '''
+        This function build the ground truth tensor for each batch in the training
+        Input:
+            ins_pred_list: list, len(fpn_level), each (bz, S^2, 2H_feat, 2W_feat)
+            / ins_pred_list is only used to record feature map
+            bbox_list: list, len(batch_size), each (n_object, 4) (x1y1x2y2 system)
+            label_list: list, len(batch_size), each (n_object, )
+            mask_list: list, len(batch_size), each (n_object, 800, 1088)
+        Output:
+            ins_gts_list: list, len(bz), list, len(fpn), (S^2, 2H_f, 2W_f)
+            ins_ind_gts_list: list, len(bz), list, len(fpn), (S^2,)
+            cate_gts_list: list, len(bz), list, len(fpn), (S, S), {1,2,3}
+        '''
         # TODO: use MultiApply to compute ins_gts_list, ins_ind_gts_list, cate_gts_list. Parallel w.r.t. img mini-batch
 
         # remember, you want to construct target of the same resolution as prediction output in training
@@ -408,9 +423,9 @@ class SOLOHead(nn.Module):
                                                                               )
 
         # check flag
-        assert ins_gts_list[0][1].shape == (self.seg_num_grids[1]**2, 200, 272)
-        assert ins_ind_gts_list[0][1].shape == (self.seg_num_grids[1]**2,)
-        assert cate_gts_list[0][1].shape == (self.seg_num_grids[1], self.seg_num_grids[1])
+        # assert ins_gts_list[0][1].shape == (self.seg_num_grids[1]**2, 200, 272)
+        # assert ins_ind_gts_list[0][1].shape == (self.seg_num_grids[1]**2,)
+        # assert cate_gts_list[0][1].shape == (self.seg_num_grids[1], self.seg_num_grids[1])
 
         return ins_gts_list, ins_ind_gts_list, cate_gts_list
     # -----------------------------------
@@ -439,31 +454,30 @@ class SOLOHead(nn.Module):
 
         # initial the output list, each entry for one featmap
 
-        w = torch.abs(gt_bboxes_raw[:,0] - gt_bboxes_raw[:,2])
-        h = torch.abs(gt_bboxes_raw[:,3] - gt_bboxes_raw[:,1])
+        w = torch.abs(gt_bboxes_raw[:,0] - gt_bboxes_raw[:,2]).to(self.device)
+        h = torch.abs(gt_bboxes_raw[:,3] - gt_bboxes_raw[:,1]).to(self.device)
         scale = torch.sqrt(w * h)
         center_list = np.asarray([ndimage.measurements.center_of_mass(mask.numpy()) for mask in gt_masks_raw])
 
-        #go through each layer of feature pyramid
+        #go through each layer of feature pyramid -> loop of 5
         for i in range(len(self.seg_num_grids)):
-            cate_label = torch.zeros((self.seg_num_grids[i],self.seg_num_grids[i]))
-            ins_label = torch.zeros((self.seg_num_grids[i]**2,featmap_sizes[i][0],featmap_sizes[i][1]))
-            ins_ind_label = torch.zeros(self.seg_num_grids[i]**2,dtype=torch.bool)
+            cate_label = torch.zeros((self.seg_num_grids[i],self.seg_num_grids[i])).to(self.device)
+            ins_label = torch.zeros((self.seg_num_grids[i]**2,featmap_sizes[i][0],featmap_sizes[i][1])).to(self.device)
+            ins_ind_label = torch.zeros(self.seg_num_grids[i]**2,dtype=torch.bool).to(self.device)
             scale_range = self.scale_ranges[i]
 
             #check object scale
             #changed single expression to double to handle multiple object case
             idx = torch.where((scale_range[0] < scale)  &( scale< scale_range[1]))[0].tolist()
 
-
             if len(idx)==0:
                 cate_label_list.append(cate_label)
                 ins_label_list.append(ins_label)
                 ins_ind_label_list.append(ins_ind_label)
                 continue
-            labels = gt_labels_raw[idx]
-            ins_layers = gt_masks_raw[idx]
-            center = torch.Tensor(center_list[idx]).view(-1,2)
+            labels = gt_labels_raw[idx].to(self.device)
+            ins_layers = gt_masks_raw[idx].to(self.device)
+            center = torch.Tensor(center_list[idx]).view(-1,2).to(self.device)
             center_x = center[:,0]
             center_y = center[:,1]
             w *= 0.2
@@ -483,7 +497,7 @@ class SOLOHead(nn.Module):
             center_y /= 1088/self.seg_num_grids[i]
 
 
-            zero_msk = torch.zeros((self.seg_num_grids[i], self.seg_num_grids[i]))
+            zero_msk = torch.zeros((self.seg_num_grids[i], self.seg_num_grids[i])).to(self.device)
 
             # print('num of objects in this layer', len(idx))
             # print('object label', labels)
@@ -492,10 +506,10 @@ class SOLOHead(nn.Module):
             #loop through each object thats falls in the range for cate_label
             for k in range(len(labels)):
                 # creat cate_label
-                temp_cate_label = torch.zeros_like(cate_label)
+                temp_cate_label = torch.zeros_like(cate_label).to(self.device)
                 temp_cate_label[int(x_tl_grid[k]):int(x_br_grid[k])+1,
                            int(y_tl_grid[k]):int(y_br_grid[k])+1] = labels[k]
-                cate_label[temp_cate_label > 0 ] = labels[k]
+                cate_label[temp_cate_label > 0] = labels[k]
                 zero_msk[int(center_x[k])-1:int(center_x[k])+2,
                          int(center_y[k])-1:int(center_y[k])+2] = 1
 
@@ -515,14 +529,14 @@ class SOLOHead(nn.Module):
             cate_label *= zero_msk
             cate_label_list.append(cate_label)
 
-
             ins_label_list.append(ins_label)
             ins_ind_label_list.append(ins_ind_label)
 
         # check flag
-        assert ins_label_list[1].shape == (1296,200,272)
-        assert ins_ind_label_list[1].shape == (1296,)
-        assert cate_label_list[1].shape == (36, 36)
+        # assert ins_label_list[1].shape == (1296,200,272)
+        # assert ins_ind_label_list[1].shape == (1296,)
+        # assert cate_label_list[1].shape == (36, 36)
+
         return ins_label_list, ins_ind_label_list, cate_label_list
 
     # This function receive pred list from forward and post-process

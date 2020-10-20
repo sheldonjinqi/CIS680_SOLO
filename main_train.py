@@ -15,6 +15,8 @@ from functools import partial
 import pdb
 from backbone import *
 from solo_head import *
+import os
+import time
 
 
 def load_data(batch_size=2):
@@ -50,17 +52,20 @@ def load_data(batch_size=2):
 
     return train_loader, test_loader
 
-
-def data_preprocess():
-    pass
-
-
 def solo_train(resnet50_fpn, solo_head, train_loader, optimizer,epoch):
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    start_time = time.time()
     solo_head.train()
 
-    running_loss = 0
-    all_loss = 0
+    running_total_loss = 0
+    all_total_loss = 0
+
+    running_focal_loss = 0
+    all_focal_loss = 0
+
+    running_dice_loss = 0
+    all_dice_loss = 0
+
     for i, data in enumerate(train_loader):
         optimizer.zero_grad()
 
@@ -68,37 +73,66 @@ def solo_train(resnet50_fpn, solo_head, train_loader, optimizer,epoch):
         imgs, label_list, mask_list, bbox_list = [data[i] for i in range(len(data))]
 
         # go through backbone
-        backouts = resnet50_fpn(imgs)
-        fpn_feat_list = list(backouts.values())
+        with torch.no_grad():
+          backouts = resnet50_fpn(imgs.to(device))
+          fpn_feat_list = list(backouts.values())
+        # print(fpn_feat_list)
+        # print("--- %s sec ---" % ((time.time() - start_time)))
         # make the target
 
         ## forward
         cate_pred_list, ins_pred_list = solo_head.forward(fpn_feat_list, eval=False)
+        # print("--- %s sec ---" % ((time.time() - start_time)))
+
         ins_gts_list, ins_ind_gts_list, cate_gts_list = solo_head.target(ins_pred_list,
                                                                          bbox_list,
                                                                          label_list,
                                                                          mask_list)
+        # print("--- %s sec ---" % ((time.time() - start_time)))
+        # print(ins_gts_list[0], ins_ind_gts_list[0], cate_gts_list[0])
         ## calculate loss
-        loss = solo_head.loss(cate_pred_list, ins_pred_list, ins_gts_list, ins_ind_gts_list, cate_gts_list)
-        loss.backward()
+        total_loss, focal_loss, dice_loss = solo_head.loss(cate_pred_list, ins_pred_list, ins_gts_list, ins_ind_gts_list, cate_gts_list)
+        # print("--- %s sec ---" % ((time.time() - start_time)))
+
+        total_loss.backward()
+        # print("--- %s sec ---" % ((time.time() - start_time)))
+
         optimizer.step()
+        # print("--- %s sec ---" % ((time.time() - start_time)))
 
         # print statistics
-        running_loss += loss.item()
-        all_loss += loss.item()
-        # pdb.set_trace()
+        running_total_loss += total_loss.item()
+        all_total_loss += total_loss.item()
+
+        running_focal_loss += focal_loss.item()
+        all_focal_loss += focal_loss.item()
+
+        running_dice_loss += dice_loss.item()
+        all_dice_loss += dice_loss.item()
+
 
         # print process
-        if i % 1 == 0:  # print every 100 mini-batches
-            print('[%d, %5d] loss: %.3f' %
-                  (epoch + 1, i + 1, running_loss / 1))
-            running_loss = 0.0
+        log_iter = 100
+        if i % log_iter == (log_iter-1):  # print every 100 mini-batches
+            print('[%d, %5d] total_loss: %.5f focal_loss: %.5f  dice_loss: %.5f' %
+                  (epoch + 1, i + 1,
+                  running_total_loss / log_iter,
+                  running_focal_loss / log_iter,
+                  running_dice_loss / log_iter))
 
+            running_total_loss = 0.0
+            running_focal_loss = 0.0
+            running_dice_loss = 0.0
+            print("--- %s minutes ---" % ((time.time() - start_time)/60))
+            start_time = time.time()
             exit()
 
-    loss = all_loss / i
 
-    return loss
+    total_loss = all_total_loss / i
+    focal_loss = all_focal_loss / i
+    mask_loss = all_dice_loss / i
+
+    return total_loss, focal_loss, mask_loss
 
 def solo_eval():
     pass
@@ -113,42 +147,59 @@ def main():
 
     ## initialize backbone and SOLO head
     resnet50_fpn = Resnet50Backbone().to(device)
-    solo_head = SOLOHead(num_classes=4).to(
+    solo_head = SOLOHead(num_classes=4, device=device).to(
         device)  ## class number is 4, because consider the background as one category.
 
     ## initialize optimizer
-    learning_rate = 1e-2 / 8  # for batch size 2
+    learning_rate = 1e-2  # for batch size 2
     import torch.optim as optim
     optimizer = optim.SGD(solo_head.parameters(),
                           lr=learning_rate, momentum=0.9, weight_decay=1e-4)
 
-    # if resume == True:
-    #   checkpoint = torch.load(path)
-    #   yolo_net.load_state_dict(checkpoint['model_state_dict'])
-    #   optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-    #   epoch = checkpoint['epoch']
+    resume = True
+    epoch_loaded = 0
+    if resume == True:
+      path = os.path.join('','solo_epoch_'+str(0))
+      checkpoint = torch.load(path)
+      solo_head.load_state_dict(checkpoint['model_state_dict'])
+      optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+      epoch_loaded = checkpoint['epoch']
+      print('loaded model')
 
     # Train your network here
+    epoch_loaded += 1
     num_epochs = 1
-    # loss_list = []
+    total_loss_list = []
+    focal_loss_list = []
+    mask_loss_list = []
+    print('.... start training ....')
     for epoch in range(num_epochs):  # loop over the dataset multiple times
-        loss = solo_train(resnet50_fpn, solo_head, train_loader, optimizer,epoch)
+        total_loss, focal_loss, mask_loss = solo_train(resnet50_fpn, solo_head, train_loader, optimizer,epoch+epoch_loaded)
 
-        # loss_list.append(loss)
+        total_loss_list.append(total_loss)
+        focal_loss_list.append(focal_loss)
+        mask_loss_list.append(mask_loss)
 
-        print('**** epoch loss', loss)
+        print('**** epoch loss ****', total_loss, focal_loss, mask_loss)
         # test(net, testloader)
 
-        ### save model ###
-        # path = os.path.join('', 'yolo_epoch' + str(epoch))
-        # torch.save({
-        #     'epoch': epoch,
-        #     'model_state_dict': net.state_dict(),
-        #     'optimizer_state_dict': optimizer.state_dict()
-        # }, path)
+        ## save model ###
+        path = os.path.join('', 'solo_epoch_' + str(epoch+epoch_loaded))
+        torch.save({
+            'epoch': epoch+epoch_loaded,
+            'model_state_dict': solo_head.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict()
+        }, path)
 
     print('Finished Training')
 
+    print('total_loss_list',total_loss_list)
+    print('focal_loss_list',focal_loss_list)
+    print('mask_loss_list',mask_loss_list)
+
 
 if __name__ == '__main__':
+    # start_time = time.time()
     main()
+    # print("--- %s minutes ---" % ((time.time() - start_time)/60))
+
