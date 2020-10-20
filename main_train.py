@@ -67,6 +67,7 @@ def solo_train(resnet50_fpn, solo_head, train_loader, optimizer,epoch):
     all_dice_loss = 0
 
     for i, data in enumerate(train_loader):
+        # print('batch: ', i)
         optimizer.zero_grad()
 
         # get the inputs
@@ -110,7 +111,16 @@ def solo_train(resnet50_fpn, solo_head, train_loader, optimizer,epoch):
         running_dice_loss += dice_loss.item()
         all_dice_loss += dice_loss.item()
 
-
+        # print('memory used before delete',torch.cuda.memory_allocated())
+        # print('memory reserved before delete',torch.cuda.memory_reserved())
+        del total_loss ,focal_loss , dice_loss
+        del imgs
+        del backouts, fpn_feat_list
+        del cate_pred_list, ins_pred_list
+        del ins_gts_list, ins_ind_gts_list, cate_gts_list
+        torch.cuda.empty_cache()
+        # print('memory used after delete',torch.cuda.memory_allocated())
+        # print('memory reserved after delete',torch.cuda.memory_reserved())
         # print process
         log_iter = 100
         if i % log_iter == (log_iter-1):  # print every 100 mini-batches
@@ -125,7 +135,7 @@ def solo_train(resnet50_fpn, solo_head, train_loader, optimizer,epoch):
             running_dice_loss = 0.0
             print("--- %s minutes ---" % ((time.time() - start_time)/60))
             start_time = time.time()
-            exit()
+
 
 
     total_loss = all_total_loss / i
@@ -156,7 +166,7 @@ def main():
     optimizer = optim.SGD(solo_head.parameters(),
                           lr=learning_rate, momentum=0.9, weight_decay=1e-4)
 
-    resume = True
+    resume = False
     epoch_loaded = 0
     if resume == True:
       path = os.path.join('','solo_epoch_'+str(0))
@@ -186,9 +196,12 @@ def main():
         ## save model ###
         path = os.path.join('', 'solo_epoch_' + str(epoch+epoch_loaded))
         torch.save({
-            'epoch': epoch+epoch_loaded,
+            'epoch': epoch + epoch_loaded,
             'model_state_dict': solo_head.state_dict(),
-            'optimizer_state_dict': optimizer.state_dict()
+            'optimizer_state_dict': optimizer.state_dict(),
+            'total_loss': total_loss_list,
+            'focal_loss': focal_loss_list,
+            'mask_loss': mask_loss_list
         }, path)
 
     print('Finished Training')
