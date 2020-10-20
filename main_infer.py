@@ -16,14 +16,45 @@ import pdb
 from backbone import *
 from solo_head import *
 from main_train import *
+import os
 
-def load_model(net, optimizer, epoch_num=0):
 
-    checkpoint = torch.load(path)
+def load_model(net, optimizer, device,epoch_num=0):
+    path = os.path.join('', 'solo_epoch_' + str(epoch_num))
+    checkpoint = torch.load(path,map_location=torch.device(device))
+
     net.load_state_dict(checkpoint['model_state_dict'])
     optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
     epoch = checkpoint['epoch']
-    return net
+    return net, optimizer
+
+def infer(solo_head,resnet50_fpn, test_loader, device='cpu', mode='infer'):
+    solo_head.eval()
+    resnet50_fpn.eval()
+    with torch.no_grad():
+        for i, data in enumerate(test_loader):
+            # get the inputs
+            imgs, label_list, mask_list, bbox_list = [data[i] for i in range(len(data))]
+
+            # go through backbone
+            backouts = resnet50_fpn(imgs.to(device))
+            fpn_feat_list = list(backouts.values())
+
+            ## forward
+            cate_pred_list, ins_pred_list = solo_head.forward(fpn_feat_list, eval=True)
+
+            NMS_sorted_scores_list, NMS_sorted_cate_label_list, NMS_sorted_ins_list = solo_head.PostProcess(
+                    ins_pred_list,
+                    cate_pred_list,
+                    ori_size=imgs.shape[-2:])
+
+
+            if mode=='infer':
+                pass
+            if mode=='map':
+                pass
+
+
 
 
 def main_infer(mode='infer'):
@@ -47,41 +78,15 @@ def main_infer(mode='infer'):
 
     ## only check the final model we have, output example figures
     if mode == 'infer':
-        solo_head, optimizer = load_model(solo_head, optimizer, epoch_num=0)
+        solo_head, optimizer = load_model(solo_head, optimizer, device, epoch_num=0)
+        infer(solo_head,resnet50_fpn, test_loader, device=device, mode='infer')
+
+
 
         pass
     ## track map over all epoch of model on test dataset
     if mode == 'map':
         pass
-    # if resume == True:
-    #   checkpoint = torch.load(path)
-    #   yolo_net.load_state_dict(checkpoint['model_state_dict'])
-    #   optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-    #   epoch = checkpoint['epoch']
-
-    # Train your network here
-    num_epochs = 1
-    # loss_list = []
-    print('.... start training ...')
-    for epoch in range(num_epochs):  # loop over the dataset multiple times
-        loss = solo_train(resnet50_fpn, solo_head, train_loader, optimizer, epoch)
-
-        # loss_list.append(loss)
-
-        print('**** epoch loss', loss)
-        # test(net, testloader)
-
-        ### save model ###
-        # path = os.path.join('', 'yolo_epoch' + str(epoch))
-        # torch.save({
-        #     'epoch': epoch,
-        #     'model_state_dict': net.state_dict(),
-        #     'optimizer_state_dict': optimizer.state_dict()
-        # }, path)
-
-    print('Finished Training')
-
-    pass
 
 
 if __name__ == '__main__':

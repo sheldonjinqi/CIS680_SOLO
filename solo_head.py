@@ -245,8 +245,8 @@ class SOLOHead(nn.Module):
         # in inference time, upsample the pred to (ori image size/4)
         if eval == True:
             ## TODO - Done resize ins_pred
-            cate_pred = self.points_nms(cate_pred).permute(0,2,3,1)
-            ins_pred = F.interpolate(ins_pred, size=upsample_shape)
+            cate_pred = self.points_nms(cate_pred).permute(0,2,3,1) # shape (2,40,40,3)
+            ins_pred = F.interpolate(ins_pred, size=upsample_shape) # shape (2,1600,200, 272)
 
         # check flag
         if eval == False:
