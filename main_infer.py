@@ -20,12 +20,12 @@ import os
 
 
 def load_model(net, optimizer, device,epoch_num=0):
-    path = os.path.join('', 'solo_epoch_' + str(epoch_num))
+    path = os.path.join('./network_results/', 'solo_epoch_' + str(epoch_num))
     checkpoint = torch.load(path,map_location=torch.device(device))
-
     net.load_state_dict(checkpoint['model_state_dict'])
     optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
     epoch = checkpoint['epoch']
+    print('Model loaded')
     return net, optimizer
 
 def infer(solo_head,resnet50_fpn, test_loader, device='cpu', mode='infer'):
@@ -67,8 +67,7 @@ def main_infer(mode='infer'):
 
     ## initialize backbone and SOLO head
     resnet50_fpn = Resnet50Backbone().to(device)
-    solo_head = SOLOHead(num_classes=4).to(
-        device)  ## class number is 4, because consider the background as one category.
+    solo_head = SOLOHead(num_classes=4,device=device).to(device)  ## class number is 4, because consider the background as one category.
 
     ## initialize optimizer
     learning_rate = 1e-2  # for batch size 2
@@ -78,7 +77,7 @@ def main_infer(mode='infer'):
 
     ## only check the final model we have, output example figures
     if mode == 'infer':
-        solo_head, optimizer = load_model(solo_head, optimizer, device, epoch_num=0)
+        solo_head, optimizer = load_model(solo_head, optimizer, device, epoch_num=40)
         infer(solo_head,resnet50_fpn, test_loader, device=device, mode='infer')
 
 

@@ -198,7 +198,6 @@ class SOLOHead(nn.Module):
         # upsample_shape is used in eval mode
         ## TODO-Done: finish forward function for single level in FPN.
         ## Notice, we distinguish the training and inference.
-
         # cate_pred = fpn_feat
         ins_pred = fpn_feat
         num_grid = self.seg_num_grids[idx]  # current level grid
@@ -227,10 +226,8 @@ class SOLOHead(nn.Module):
         # should the first index be batch size?
         # mesh_layers = torch.ones([2,2,w,h])
         mesh_layers = torch.ones([cate_pred.shape[0], 2, w, h]).to(self.device)
-
         mesh_layers[:, 0, :, :] = mesh_layers[:, 0, :, :] * mesh_w
         mesh_layers[:, 1, :, :] = mesh_layers[:, 1, :, :] * mesh_h
-
         ins_pred = torch.cat((ins_pred, mesh_layers),1) # shape (2, 258, w. h)
 
 
@@ -567,16 +564,15 @@ class SOLOHead(nn.Module):
         NMS_sorted_scores_list = []
         NMS_sorted_cate_label_list = []
         NMS_sorted_ins_list = []
-
         ins_preds = torch.cat(ins_pred_list,dim=1) #desired output shape: bz, all_level s^2, Ori_H/4, Ori_W/4
 
 
         cate_preds = [torch.flatten(cate_pred_level,start_dim=1,end_dim=2)
                       for cate_pred_level in cate_pred_list] #list, len fpn, (bz,s^2, c-1)
-        cate_preds = torch.cat(cate_pred_list, 1) #resulting shape should be  (bz,all_level_s^2,c-1)
+        cate_preds = torch.cat(cate_preds, 1) #resulting shape should be  (bz,all_level_s^2,c-1)
         # loop through images in batch
         for i in range(batch_size):
-            NMS_sorted_scores, NMS_sorted_cate_label, NMS_sorted_ins = self.PostProcessImg(ins_preds[i],cate_preds[i])
+            NMS_sorted_scores, NMS_sorted_cate_label, NMS_sorted_ins = self.PostProcessImg(ins_preds[i],cate_preds[i],ori_size)
             NMS_sorted_scores_list.append(NMS_sorted_scores)
             NMS_sorted_cate_label_list.append(NMS_sorted_cate_label)
             NMS_sorted_ins_list.append(NMS_sorted_ins)
@@ -639,16 +635,21 @@ class SOLOHead(nn.Module):
         area_mat = torch.sum(flatten_mask, dim=1)
         union_mat = area_mat + area_mat.T - intersection_mat
 
-        # not sure why this but suggested in pseudocode
-        iou_mat = intersection_mat/union_matl
+        # not sure why this but suggested in pseudocode, scores on sorted, uppertrianguler keeps the elements i<j
+        # , which indicates s_i > s_j, thus satisfy the constrint
+        iou_mat = intersection_mat/union_mat
         iou_mat = torch.triu(iou_mat,diagonal=1)
-        # alternative approach
-        iou_mat = iou_mat - torch.eye(len(iou_mat)) #shape: n_act x n_act
-        iou_max = torch.max(iou_mat,dim=1).expand(num_mask,num_mask).T # max iou between mask_i and the rest of masks
 
+        iou_max = torch.max(iou_mat, dim=0)
+        ious_max = iou_max.expand(num_mask,num_mask).T
+
+
+        # # alternative approach
+        # iou_mat = iou_mat - torch.eye(len(iou_mat)) #shape: n_act x n_act
+        # iou_max = torch.max(iou_mat,dim=1).expand(num_mask,num_mask).T # max iou between mask_i and the rest of masks
 
         if method == 'gauss':
-            decay_mat = torch.exp(-(iou_mat ** 2 ) / gauss_sigma)
+            decay_mat = torch.exp(-(iou_mat ** 2 - ious_max ** 2 ) / gauss_sigma)
         else: #linear function
             decay_mat = (1-iou_mat) / (1-iou_max)
 
@@ -656,7 +657,8 @@ class SOLOHead(nn.Module):
         decay_mat
         decay = torch.min(decay_mat,dim = 0) #shape: (n_act,)
         decay_scores = decay * sorted_scores
-        pass
+        return decay_scores
+
 
     # -----------------------------------
     ## The following code is for visualization

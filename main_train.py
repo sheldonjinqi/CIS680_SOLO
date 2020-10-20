@@ -159,7 +159,8 @@ def main():
     resnet50_fpn = Resnet50Backbone().to(device)
     solo_head = SOLOHead(num_classes=4, device=device).to(
         device)  ## class number is 4, because consider the background as one category.
-
+    print('solo head',solo_head.device)
+    exit()
     ## initialize optimizer
     learning_rate = 1e-2  # for batch size 2
     import torch.optim as optim
@@ -194,15 +195,15 @@ def main():
         # test(net, testloader)
 
         ## save model ###
-        path = os.path.join('', 'solo_epoch_' + str(epoch+epoch_loaded))
-        torch.save({
-            'epoch': epoch + epoch_loaded,
-            'model_state_dict': solo_head.state_dict(),
-            'optimizer_state_dict': optimizer.state_dict(),
-            'total_loss': total_loss_list,
-            'focal_loss': focal_loss_list,
-            'mask_loss': mask_loss_list
-        }, path)
+        path = os.path.join('/network_results/', 'solo_epoch_' + str(epoch+epoch_loaded))
+        # torch.save({
+        #     'epoch': epoch + epoch_loaded,
+        #     'model_state_dict': solo_head.state_dict(),
+        #     'optimizer_state_dict': optimizer.state_dict(),
+        #     'total_loss': total_loss_list,
+        #     'focal_loss': focal_loss_list,
+        #     'mask_loss': mask_loss_list
+        # }, path)
 
     print('Finished Training')
 
