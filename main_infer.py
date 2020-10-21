@@ -118,7 +118,7 @@ def main_infer(mode='infer'):
     ## only check the final model we have, output example figures
     if mode == 'infer':
         solo_head, optimizer = load_model(solo_head, optimizer, device, epoch_num=40)
-        map = infer(solo_head,resnet50_fpn, train_loader, device=device, mode='infer')
+        map = infer(solo_head,resnet50_fpn, train_loader, device=device, mode='map')
 
         print(map)
 
