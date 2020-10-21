@@ -887,8 +887,126 @@ class SOLOHead(nn.Module):
 
     def evaluation(self, NMS_sorted_scores_list, NMS_sorted_cate_label_list,
                    NMS_sorted_ins_list, ins_gts_list, cate_gts_list):
+        '''
+        :param NMS_sorted_scores_list:
+        :param NMS_sorted_cate_label_list: shape:(bz, instance_number, 1)
+        :param NMS_sorted_ins_list: shape:(bz, instance_number, ori_h, ori_w)
+        :param ins_gts_list: (bz, instance_number)
+        :param cate_gts_list: (bz, instance_number, ori_h, ori_w)
+        :return:
+        '''
+
+        ## 0->pedestrian, 1->traffic, 2->car
+        match = {0: [], 1: [], 2: []}  # prediction &grnd truth same class and IoU > 0.5.
+        scores = {0: [], 1: [], 2: []}  # track of the confidence score for every prediction
+        trues = {0: 0, 1: 0, 2: 0}
+        print(NMS_sorted_cate_label_list, NMS_sorted_ins_list, ins_gts_list, cate_gts_list)
+
+        # ## create selection mask from gnd truth label
+        # labelMask = out_NMS[:, 0, :, :] != 0
+        # trueLMask = labels[:, 0, :, :] != 0
+        # clsMask = torch.argmax(out_NMS[:, 5:, :, :], dim=1)
+        #
+        # pedeMask = torch.bitwise_and(clsMask == 0, labelMask)
+        # trafficMask = torch.bitwise_and(clsMask == 1, labelMask)
+        # carMask = torch.bitwise_and(clsMask == 2, labelMask)
+        #
+        # masks = [pedeMask, trafficMask, carMask]
+        # ## select
+        # for cls in range(3):
+        #     mask = masks[cls]
+        #     ## check if empty selelct:
+        #     total = torch.sum(mask.int()).item()
+        #     if total != 0:
+        #         score = out_NMS[:, 0][mask]
+        #         scores[cls] = score.cpu()
+        #         ## slise out all cls prediction
+        #         output_candi = []  ## should be shape(#response,8)
+        #         label_candi = []  ## should be shape(#response,8)
+        #
+        #         ## temp for loop deal with batch slice
+        #         for b in range(len(out_NMS)):
+        #             if b == 0:
+        #                 output_candi = torch.transpose(out_NMS[b][:, mask[b]], 0, 1)
+        #                 label_candi = torch.transpose(labels[b][:, mask[b]], 0, 1)
+        #                 continue
+        #             output_candi = torch.cat((output_candi, torch.transpose(out_NMS[b][:, mask[b]], 0, 1)), 0)
+        #             label_candi = torch.cat((label_candi, torch.transpose(labels[b][:, mask[b]], 0, 1)), 0)
+        #
+        #         ## check if label are same class
+        #         pair_label = (torch.argmax(output_candi[:, 5:], dim=1) - torch.argmax(label_candi[:, 5:], dim=1)) == 0
+        #
+        #         ## make box & calculate iou
+        #         box1 = (output_candi[:, 1], output_candi[:, 2], output_candi[:, 3], output_candi[:, 4])
+        #         box2 = (label_candi[:, 1], label_candi[:, 2], label_candi[:, 3], label_candi[:, 4])
+        #         iou = IOU(box1, box2) > 0.5
+        #
+        #         ## calulate match
+        #         match[cls] = torch.bitwise_and(pair_label, iou).cpu().int()
+        #
+        #     ## get true for this class
+        #     trueClsMask = torch.bitwise_and(torch.argmax(labels[:, 5:, :, :], dim=1) == cls, trueLMask)
+        #     trues[cls] = torch.sum(trueClsMask.int()).cpu().item()
+        #     # pdb.set_trace()
+
+        return match, scores, trues
+
+
         pass
 
+    def average_precision(self,MATCH_cls, SCORES_cls, TRUES_cls):
+
+        '''
+          match: shape (1,#) torch
+          score: shape (1,#) torch
+          total: number
+          '''
+        from sklearn.metrics import auc
+        ## please fill in the appropriate arguements
+        ## compute the average precision as mentioned in the PDF.
+        ## it might be helpful to use - from sklearn.metrics import auc to compute area under the curve.
+
+        # match= match.numpy()
+        # score=score.numpy()
+        match = np.asarray(match)
+        score = np.asarray(score)
+        maximum_score = np.max(score)
+        ln = np.linspace(0.6, maximum_score, 100)
+        precision_mat = np.zeros((101))
+        recall_mat = np.zeros((101))
+
+        for i, th in enumerate(ln):
+            match_th_mask = score > th
+            TP = np.sum(match[match_th_mask])
+            total_positive = len(match[match_th_mask])
+            precision = 1
+            if total_positive > 0:
+                precision = TP / total_positive
+
+            recall = 1
+            total_trues = total
+            if total_trues > 0:
+                recall = TP / total_trues
+
+            precision_mat[i] = precision
+            recall_mat[i] = recall
+
+        recall_mat[100] = 0
+        precision_mat[100] = 1
+        sorted_ind = np.argsort(recall_mat)
+        sorted_recall = recall_mat[sorted_ind]
+        sorted_precision = precision_mat[sorted_ind]
+
+        area = auc(sorted_recall, sorted_precision)
+        # plt.plot(sorted_recall, sorted_precision)
+        # plt.show()
+        # pdb.set_trace()
+
+        return area
+
+
+
+        pass
 
 
 
