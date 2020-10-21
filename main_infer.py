@@ -31,11 +31,6 @@ def load_model(net, optimizer, device,epoch_num=0):
 def infer(solo_head,resnet50_fpn, test_loader, device='cpu', mode='infer'):
     solo_head.eval()
     resnet50_fpn.eval()
-    color_list = ["jet", "ocean", "Spectral"]
-    MATCH = {0: [], 1: [], 2: []}
-    SCORES = {0: [], 1: [], 2: []}
-    TRUES = {0: 0, 1: 0, 2: 0}
-
     with torch.no_grad():
         for i, data in enumerate(test_loader):
             # get the inputs
@@ -47,9 +42,6 @@ def infer(solo_head,resnet50_fpn, test_loader, device='cpu', mode='infer'):
 
             ## forward
             cate_pred_list, ins_pred_list = solo_head.forward(fpn_feat_list, eval=True)
-
-
-
             NMS_sorted_scores_list, NMS_sorted_cate_label_list, NMS_sorted_ins_list = solo_head.PostProcess(
                     ins_pred_list,
                     cate_pred_list,
@@ -57,44 +49,11 @@ def infer(solo_head,resnet50_fpn, test_loader, device='cpu', mode='infer'):
 
 
             if mode=='infer':
-                solo_head.PlotInfer(NMS_sorted_scores_list, NMS_sorted_cate_label_list, NMS_sorted_ins_list,
-                                    color_list, imgs, i)
-                print('label_list',label_list)
-                if i == 8:
-                    exit()
+                pass
             if mode=='map':
-                ## target
-                ins_gts_list, ins_ind_gts_list, cate_gts_list = solo_head.target(ins_pred_list,
-                                                                                 bbox_list,
-                                                                                 label_list,
-                                                                                 mask_list)
-                match, scores, trues = solo_head.evaluation(NMS_sorted_scores_list,
-                                                            NMS_sorted_cate_label_list,
-                                                            NMS_sorted_ins_list,
-                                                            ins_gts_list,
-                                                            cate_gts_list)
+                pass
 
-                for cls in range(3):
-                    if len(match[cls]) > 0:
-                        MATCH[cls] += (list(match[cls].numpy()))
-                    if len(scores[cls]) > 0:
-                        SCORES[cls] += (list(scores[cls].numpy()))
-                    TRUES[cls] += trues[cls]
 
-        if mode=='map':
-            AP = 0
-            cnt = 0
-            mAP = 0
-            for cls in range(3):
-                if len(MATCH[cls]) > 0:
-                    AP += solo_head.average_precision(MATCH[cls], SCORES[cls], TRUES[cls])
-                    cnt += 1
-            if cnt > 0:
-                mAp = AP / cnt
-            return mAp
-
-        else:
-            return -1
 
 
 def main_infer(mode='infer'):
@@ -118,10 +77,11 @@ def main_infer(mode='infer'):
     ## only check the final model we have, output example figures
     if mode == 'infer':
         solo_head, optimizer = load_model(solo_head, optimizer, device, epoch_num=40)
-        map = infer(solo_head,resnet50_fpn, train_loader, device=device, mode='infer')
+        infer(solo_head,resnet50_fpn, test_loader, device=device, mode='infer')
 
-        print(map)
 
+
+        pass
     ## track map over all epoch of model on test dataset
     if mode == 'map':
         pass
