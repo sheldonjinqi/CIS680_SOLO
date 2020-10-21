@@ -559,8 +559,8 @@ class SOLOHead(nn.Module):
         #                         zip(ins_preds_level, ins_ind_labels_level)], 0)
         #              for ins_preds_level, ins_ind_labels_level in
         #              zip(ins_pred_list, zip(*ins_ind_gts_list))]
-        print('memory used before PostProcess', torch.cuda.memory_allocated())
-        print('memory reserved before PostProcess',torch.cuda.memory_reserved())
+        # print('memory used before PostProcess', torch.cuda.memory_allocated())
+        # print('memory reserved before PostProcess',torch.cuda.memory_reserved())
         batch_size = ins_pred_list[0].shape[0] # should be 2
         NMS_sorted_scores_list = []
         NMS_sorted_cate_label_list = []
@@ -601,7 +601,7 @@ class SOLOHead(nn.Module):
                        ori_size):
 
         # ## TODO: PostProcess on single image.
-        ## Here the function can be modified to process the entire batch together
+        # Here the function can be modified to process the entire batch together
         ins_pred_img = ins_pred_img.cpu()
         cate_pred_img = cate_pred_img.cpu()
         # print('memory used before PostProcessImg',torch.cuda.memory_allocated())
@@ -613,19 +613,22 @@ class SOLOHead(nn.Module):
 
         cate_thresh_idx = torch.where(c_max > self.postprocess_cfg.get('cate_thresh')) #find cells that c_max > cate_thresh
         ins_thresh_idx = torch.where(ins_pred_img > self.postprocess_cfg.get('ins_thresh'))
-        cate_pred_img = cate_pred_img[cate_thresh_idx]
-        ins_pred_img = ins_pred_img[cate_thresh_idx]
-
 
         indicator_fc = torch.zeros_like(ins_pred_img)
-        indicator_fc[ins_thresh_idx] = 1
         indicator_cate = torch.zeros_like(ins_pred_img)
+
+        ins_pred_img_tmp = ins_pred_img[cate_thresh_idx]
+        cate_pred_img_tmp = cate_pred_img[cate_thresh_idx]
+
+        indicator_fc[ins_thresh_idx] = 1
+
         indicator_cate[cate_thresh_idx] =1
 
         print('test')
 
         #vectorized, check the shape of each term, could be bug here!
-        mask_score = torch.sum(ins_pred_img * indicator_fc * indicator_cate, dim =(-1,-2)) / torch.sum(indicator_fc * indicator_cate, dim=(-1,-2)) * c_max
+        mask_score = torch.sum(ins_pred_img * indicator_fc * indicator_cate, dim =(-1,-2)) / \
+                     torch.sum(indicator_fc * indicator_cate, dim=(-1,-2)) * c_max
 
         # not sure why these should be list of len(bz), asked on piazza, double check !
         sorted_mask_score, sort_idx = torch.sort(mask_score,descending= True)
@@ -633,66 +636,78 @@ class SOLOHead(nn.Module):
         sorted_ins_pred = ins_pred_img[sort_idx]
 
         NMS_score = self.MatrixNMS(sorted_ins_pred,sorted_mask_score)
+        # print('NMS_score',NMS_score)
         sorted_NMS_score, NMS_idx = torch.sort(NMS_score, descending = True)
         sorted_cate_pred = sorted_cate_pred[NMS_idx]
-        sorted_ins_pred = sorted_cate_pred[NMS_idx]
+        sorted_ins_pred = sorted_ins_pred[NMS_idx]
+        sorted_NMS_score = sorted_mask_score[NMS_idx]
 
         #pick the 5 highest
-        sorted_NMS_score = sorted_NMS_score[:5]
-        sorted_cate_pred = sorted_cate_pred[:5]
-        sorted_ins_pred = sorted_ins_pred[:5]
+        decay_threshold = 0.2
+        keep_instance = max(min((NMS_score > decay_threshold).sum(), 5), 1)
+        keep_instance = 5
+        sorted_NMS_score = sorted_NMS_score[:keep_instance]
+        sorted_cate_pred = sorted_cate_pred[:keep_instance]
+        # sorted_ins_pred = sorted_ins_pred[:keep_instance] ##### bug!
 
+        _,sorted_cate_pred = torch.max(sorted_cate_pred, dim=1)
+
+        # nms_sorted_ins = F.interpolate(nms_sorted_ins.view(1, keep_instance, ins_h, ins_w), (ori_h, ori_w)) ##### bug!
+
+        print(sorted_NMS_score, sorted_cate_pred, sorted_ins_pred)
         return sorted_NMS_score, sorted_cate_pred, sorted_ins_pred
 
 
-        ## TODO: PostProcess on single image.
-        # PostProcessing Parameters
-        cate_thresh = self.postprocess_cfg['cate_thresh']
-        ins_thresh = self.postprocess_cfg['ins_thresh']
-        pre_NMS_num = self.postprocess_cfg['pre_NMS_num']
-        keep_instance = self.postprocess_cfg['keep_instance']
-        IoU_thresh = self.postprocess_cfg['IoU_thresh']
-        decay_thresh = 0.2  # suppress all decay scores smaller than decay_thresh
-
-        # Calculating scores. NMS here means pre-suppress by threshold
-        cate_value, cate_ind = torch.max(cate_pred_img, dim=1)  # (all_level_S^2,), float, [0,1]; int
-        valid_cate_indices = cate_value > cate_thresh  # (all_level_S^2,), bool
-        cate_value_nms = torch.where(valid_cate_indices, cate_value,
-                                     torch.zeros_like(cate_value))  # (all_level_S^2,), float
-        cate_ind_nms = torch.where(valid_cate_indices, cate_ind,
-                                   3 * torch.ones_like(cate_ind))  # (all_level_S^2,), int
-        valid_ins_indices = ins_pred_img > ins_thresh  # (all_level_S^2, ori_H/4, ori_W/4), bool
-        ins_nms = torch.where(valid_ins_indices, ins_pred_img,
-                              torch.zeros_like(ins_pred_img))  # (all_level_S^2, ori_H/4, ori_W/4), float
-        scores = ins_nms.sum(dim=[1, 2]) / (valid_ins_indices.sum(dim=[1, 2]) + 1e-5) \
-                 * cate_value_nms  # (all_level_S^2,), float
-        scores_order = torch.argsort(scores, descending=True)  # (all_level_S^2,), int
-        scores_order = scores_order[0:pre_NMS_num]  # (n_act,), int
-
-        # Sort scores
-        sorted_scores = scores[scores_order]  # (n_act,), float
-        sorted_ins = (ins_nms[scores_order] > 0.5).float()  # (n_act, ori_H/4, ori_W/4), [0,1]
-        sorted_cate = cate_ind_nms[scores_order]  # (n_act,), int
-
-        # Matrix NMS
-        NMS_sorted_scores_list = []
-        NMS_sorted_cate_label_list = []
-        NMS_sorted_ins_list = []
-
-        decay_scores = self.MatrixNMS(sorted_ins, sorted_scores)  # (n_act,), float
-        keep_instance = max(min((decay_scores > decay_thresh).sum(), keep_instance),1)
-        decay_order = torch.argsort(decay_scores, descending=True)  # (n_act,), int
-        decay_order = decay_order[0:keep_instance]  # (keep_instance,), int
-        NMS_sorted_scores_list.append(sorted_scores[decay_order])
-        NMS_sorted_cate_label_list.append(sorted_cate[decay_order])
-        ori_h, ori_w = ori_size[0], ori_size[1]
-        ins_h, ins_w = ins_pred_img.shape[1], ins_pred_img.shape[2]
-        nms_sorted_ins = sorted_ins[decay_order]  # (keep_instance, ori_H/4, ori_W/4), float
-        nms_sorted_ins = torch.nn.functional.interpolate(nms_sorted_ins.view(1, keep_instance, ins_h, ins_w),
-                                                         (ori_h, ori_w))  # (1, keep_instance, ori_H, ori_W), float
-        NMS_sorted_ins_list.append(nms_sorted_ins[0])
-
-        return NMS_sorted_scores_list, NMS_sorted_cate_label_list, NMS_sorted_ins_list
+        # # ## TODO: PostProcess on single image.
+        # # # PostProcessing Parameters
+        # cate_thresh = self.postprocess_cfg['cate_thresh']
+        # ins_thresh = self.postprocess_cfg['ins_thresh']
+        # pre_NMS_num = self.postprocess_cfg['pre_NMS_num']
+        # keep_instance = self.postprocess_cfg['keep_instance']
+        # IoU_thresh = self.postprocess_cfg['IoU_thresh']
+        # decay_thresh = 0.2  # suppress all decay scores smaller than decay_thresh
+        #
+        # # Calculating scores. NMS here means pre-suppress by threshold
+        # cate_value, cate_ind = torch.max(cate_pred_img, dim=1)  # (all_level_S^2,), float, [0,1]; int
+        # valid_cate_indices = cate_value > cate_thresh  # (all_level_S^2,), bool
+        # cate_value_nms = torch.where(valid_cate_indices, cate_value,
+        #                              torch.zeros_like(cate_value))  # (all_level_S^2,), float
+        # cate_ind_nms = torch.where(valid_cate_indices, cate_ind,
+        #                            3 * torch.ones_like(cate_ind))  # (all_level_S^2,), int
+        # valid_ins_indices = ins_pred_img > ins_thresh  # (all_level_S^2, ori_H/4, ori_W/4), bool
+        # ins_nms = torch.where(valid_ins_indices, ins_pred_img,
+        #                       torch.zeros_like(ins_pred_img))  # (all_level_S^2, ori_H/4, ori_W/4), float
+        # scores = ins_nms.sum(dim=[1, 2]) / (valid_ins_indices.sum(dim=[1, 2]) + 1e-5) \
+        #          * cate_value_nms  # (all_level_S^2,), float
+        # scores_order = torch.argsort(scores, descending=True)  # (all_level_S^2,), int
+        # scores_order = scores_order[0:pre_NMS_num]  # (n_act,), int
+        #
+        # # Sort scores
+        # sorted_scores = scores[scores_order]  # (n_act,), float
+        # sorted_ins = (ins_nms[scores_order] > 0.5).float()  # (n_act, ori_H/4, ori_W/4), [0,1]
+        # sorted_cate = cate_ind_nms[scores_order]  # (n_act,), int
+        #
+        # # Matrix NMS
+        # NMS_sorted_scores_list = []
+        # NMS_sorted_cate_label_list = []
+        # NMS_sorted_ins_list = []
+        #
+        # decay_scores = self.MatrixNMS(sorted_ins, sorted_scores)  # (n_act,), float
+        # keep_instance = max(min((decay_scores > decay_thresh).sum(), keep_instance),1)
+        # print(decay_scores)
+        # decay_order = torch.argsort(decay_scores, descending=True)  # (n_act,), int
+        # decay_order = decay_order[0:keep_instance]  # (keep_instance,), int
+        # print(decay_scores)
+        # NMS_sorted_scores_list.append(sorted_scores[decay_order])
+        # NMS_sorted_cate_label_list.append(sorted_cate[decay_order])
+        # ori_h, ori_w = ori_size[0], ori_size[1]
+        # ins_h, ins_w = ins_pred_img.shape[1], ins_pred_img.shape[2]
+        # nms_sorted_ins = sorted_ins[decay_order]  # (keep_instance, ori_H/4, ori_W/4), float
+        # nms_sorted_ins = torch.nn.functional.interpolate(nms_sorted_ins.view(1, keep_instance, ins_h, ins_w),
+        #                                                  (ori_h, ori_w))  # (1, keep_instance, ori_H, ori_W), float
+        # NMS_sorted_ins_list.append(nms_sorted_ins[0])
+        # print(NMS_sorted_scores_list, NMS_sorted_cate_label_list, NMS_sorted_ins_list)
+        # return NMS_sorted_scores_list, NMS_sorted_cate_label_list, NMS_sorted_ins_list
 
         pass
 
@@ -706,57 +721,59 @@ class SOLOHead(nn.Module):
         ## TODO: finish MatrixNMS
 
         # #compute IOU
-        # num_mask = len(sorted_scores)
-        # flatten_mask = torch.flatten(sorted_ins,start_dim=1)
-        # intersection_mat = flatten_mask @ flatten_mask.T
-        # area_mat = torch.sum(flatten_mask, dim=1)
-        # union_mat = area_mat + area_mat.T - intersection_mat
-        #
-        # # not sure why this but suggested in pseudocode, scores on sorted, uppertrianguler keeps the elements i<j
-        # # , which indicates s_i > s_j, thus satisfy the constrint
-        # iou_mat = intersection_mat/union_mat
-        # iou_mat = torch.triu(iou_mat,diagonal=1)
-        #
-        # iou_max = torch.max(iou_mat, dim=0)
-        # ious_max = iou_max.expand(num_mask,num_mask).T
-        #
-        #
-        # # # alternative approach
-        # # iou_mat = iou_mat - torch.eye(len(iou_mat)) #shape: n_act x n_act
-        # # iou_max = torch.max(iou_mat,dim=1).expand(num_mask,num_mask).T # max iou between mask_i and the rest of masks
-        #
-        # if method == 'gauss':
-        #     decay_mat = torch.exp(-(iou_mat ** 2 - ious_max ** 2 ) / gauss_sigma)
-        # else: #linear function
-        #     decay_mat = (1-iou_mat) / (1-iou_max)
-        #
-        # #this line is not in psudocode but used to check score condition
-        # decay_mat
-        # decay = torch.min(decay_mat,dim = 0) #shape: (n_act,)
-        # decay_scores = decay * sorted_scores
-        # return decay_scores
-        N = len(sorted_ins)
-        sorted_ins = sorted_ins.reshape(N, -1)
-        # pre-compute the IoU matrix: (N, N)
-        intersection = torch.mm(sorted_ins, sorted_ins.T)
-        areas = sorted_ins.sum(dim=1).expand(N, N)
-        union = areas + areas.T - intersection + 1e-8
-        test = union.cpu().numpy()
-        ious = (intersection / union).triu(diagonal=1)
-        # max IoU for each: (N, N)
-        ious_cmax = ious.max(dim=0).values
-        ious_cmax = ious_cmax.expand(N, N).T
+        num_mask = len(sorted_scores)
+        flatten_mask = torch.flatten(sorted_ins,start_dim=1)
+        intersection_mat = flatten_mask @ flatten_mask.T
+        area_mat = torch.sum(flatten_mask, dim=1)
+        union_mat = area_mat + area_mat.T - intersection_mat
 
-        # Matrix NMS: (N, N)
+        # not sure why this but suggested in pseudocode, scores on sorted, uppertrianguler keeps the elements i<j
+        # , which indicates s_i > s_j, thus satisfy the constrint
+        iou_mat = intersection_mat/union_mat
+        iou_mat = torch.triu(iou_mat,diagonal=1)
+
+        iou_max,_ = torch.max(iou_mat, dim=0)
+        ious_max = iou_max.expand(num_mask,num_mask).T
+
+
+        # # alternative approach
+        # iou_mat = iou_mat - torch.eye(len(iou_mat)) #shape: n_act x n_act
+        # iou_max = torch.max(iou_mat,dim=1).expand(num_mask,num_mask).T # max iou between mask_i and the rest of masks
+
         if method == 'gauss':
-            decay = torch.exp(-(ious ** 2 - ious_cmax ** 2) / gauss_sigma)
-        else:  # linear
-            decay = (1 - ious) / (1 - ious_cmax)
+            decay_mat = torch.exp(-(iou_mat ** 2 - ious_max ** 2 ) / gauss_sigma)
+        else: #linear function
+            decay_mat = (1-iou_mat) / (1-iou_max)
 
-        # decay factor: (N,)
-        decay = torch.min(decay, dim=0).values
+        #this line is not in psudocode but used to check score condition
+        # decay_mat
+        decay,_ = torch.min(decay_mat,dim = 0) #shape: (n_act,)
+        decay_scores = decay * sorted_scores
+        return decay_scores
 
-        return sorted_scores * decay
+        ## Todo: Reference code
+        # N = len(sorted_ins)
+        # sorted_ins = sorted_ins.reshape(N, -1)
+        # # pre-compute the IoU matrix: (N, N)
+        # intersection = torch.mm(sorted_ins, sorted_ins.T)
+        # areas = sorted_ins.sum(dim=1).expand(N, N)
+        # union = areas + areas.T - intersection + 1e-8
+        # test = union.cpu().numpy()
+        # ious = (intersection / union).triu(diagonal=1)
+        # # max IoU for each: (N, N)
+        # ious_cmax = ious.max(dim=0).values
+        # ious_cmax = ious_cmax.expand(N, N).T
+        #
+        # # Matrix NMS: (N, N)
+        # if method == 'gauss':
+        #     decay = torch.exp(-(ious ** 2 - ious_cmax ** 2) / gauss_sigma)
+        # else:  # linear
+        #     decay = (1 - ious) / (1 - ious_cmax)
+        #
+        # # decay factor: (N,)
+        # decay = torch.min(decay, dim=0).values
+        #
+        # return sorted_scores * decay
 
 
     # -----------------------------------
