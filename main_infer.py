@@ -20,7 +20,7 @@ import os
 
 
 def load_model(net, optimizer, device,epoch_num=0):
-    path = os.path.join('./network_results/', 'solo_epoch_' + str(epoch_num))
+    path = os.path.join('./network_result1/', 'solo_epoch_' + str(epoch_num))
     checkpoint = torch.load(path,map_location=torch.device(device))
     net.load_state_dict(checkpoint['model_state_dict'])
     optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
@@ -60,7 +60,7 @@ def infer(solo_head,resnet50_fpn, test_loader, device='cpu', mode='infer'):
                 solo_head.PlotInfer(NMS_sorted_scores_list, NMS_sorted_cate_label_list, NMS_sorted_ins_list,
                                     color_list, imgs, i)
                 print('label_list',label_list)
-                if i == 0:
+                if i == 10:
                     exit()
             if mode=='map':
                 ## target
@@ -117,8 +117,8 @@ def main_infer(mode='infer'):
 
     ## only check the final model we have, output example figures
     if mode == 'infer':
-        solo_head, optimizer = load_model(solo_head, optimizer, device, epoch_num=40)
-        map = infer(solo_head,resnet50_fpn, train_loader, device=device, mode='map')
+        solo_head, optimizer = load_model(solo_head, optimizer, device, epoch_num=50)
+        map = infer(solo_head,resnet50_fpn, train_loader, device=device, mode='infer')
 
         print(map)
 

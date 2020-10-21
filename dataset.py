@@ -158,16 +158,16 @@ if __name__ == '__main__':
 
     # push the randomized training data into the dataloader
     batch_size = 5
-    train_build_loader = BuildDataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
+    train_build_loader = BuildDataLoader(train_dataset, batch_size=batch_size, shuffle=False, num_workers=0)
     train_loader = train_build_loader.loader()
     test_build_loader = BuildDataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=0)
     test_loader = test_build_loader.loader()
 
-    mask_color_list = ["jet", "ocean", "Spectral", "spring", "cool"]
+    mask_color_list = ["jet", "ocean", "Spectral"]
     # loop the image
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     for iter, data in enumerate(train_loader, 0):
-        # print(len([data[i] for i in range(len(data))]))
+        print(len([data[i] for i in range(len(data))]))
         img, label, mask, bbox = [data[i] for i in range(len(data))]
         # check flag
         assert img.shape == (batch_size, 3, 800, 1088)
@@ -204,19 +204,14 @@ if __name__ == '__main__':
                 ax.add_patch(rect)
 
             # plot mask
-            print('image: ',i)
+            # print('image: ',i)
             print('num of mask', len(mask[i]))
             for j,msk in enumerate(mask[i]):
                 cls = label[i][j]
-                print(cls)
+                print('cls',cls)
                 msk = np.ma.masked_where(msk == 0, msk)
-                print(msk.shape)
-                plt.imshow(msk, mask_color_list[int(cls)], interpolation='none', alpha=0.7)
+                # print(msk.shape)
+                plt.imshow(msk, cmap=mask_color_list[int(cls)-1], alpha=0.7)
 
             # plt.savefig("./testfig/visualtrainset"+str(iter)+"_"+ str(i)+".png")
             plt.show()
-            # print(label[i].shape,mask[i].shape,bbox[i].shape)
-
-        if iter == 0:
-            break
-
