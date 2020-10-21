@@ -579,7 +579,6 @@ class SOLOHead(nn.Module):
 
         assert len(NMS_sorted_scores_list) == batch_size #check output shape
         return NMS_sorted_scores_list, NMS_sorted_cate_label_list, NMS_sorted_ins_list
-        pass
 
 
     # This function Postprocess on single img
@@ -615,7 +614,17 @@ class SOLOHead(nn.Module):
         sorted_cate_pred = cate_pred_img[sort_idx]
         sorted_ins_pred = ins_pred_img[sort_idx]
 
-        return sorted_mask_score, sorted_cate_pred, sorted_ins_pred
+        NMS_score = self.MatrixNMS(sorted_ins_pred,sorted_mask_score)
+        sorted_NMS_score, NMS_idx = torch.sort(NMS_score, descending = True)
+        sorted_cate_pred = sorted_cate_pred[NMS_idx]
+        sorted_ins_pred = sorted_cate_pred[NMS_idx]
+
+        #pick the 5 highest
+        sorted_NMS_score = sorted_NMS_score[:5]
+        sorted_cate_pred = sorted_cate_pred[:5]
+        sorted_ins_pred = sorted_ins_pred[:5]
+
+        return sorted_NMS_score, sorted_cate_pred, sorted_ins_pred
 
         pass
 
