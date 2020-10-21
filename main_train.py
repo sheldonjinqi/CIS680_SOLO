@@ -159,8 +159,7 @@ def main():
     resnet50_fpn = Resnet50Backbone().to(device)
     solo_head = SOLOHead(num_classes=4, device=device).to(
         device)  ## class number is 4, because consider the background as one category.
-    print('solo head',solo_head.device)
-    exit()
+
     ## initialize optimizer
     learning_rate = 1e-2  # for batch size 2
     import torch.optim as optim
@@ -179,14 +178,19 @@ def main():
 
     # Train your network here
     epoch_loaded += 1
-    num_epochs = 1
+    num_epochs = 50
     total_loss_list = []
     focal_loss_list = []
     mask_loss_list = []
     print('.... start training ....')
     for epoch in range(num_epochs):  # loop over the dataset multiple times
+        if epoch == 27:
+          for g in optimizer.param_groups:
+            g['lr'] = 1e-3
+        if epoch == 33:
+          for g in optimizer.param_groups:
+            g['lr'] = 1e-4
         total_loss, focal_loss, mask_loss = solo_train(resnet50_fpn, solo_head, train_loader, optimizer,epoch+epoch_loaded)
-
         total_loss_list.append(total_loss)
         focal_loss_list.append(focal_loss)
         mask_loss_list.append(mask_loss)

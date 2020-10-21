@@ -559,12 +559,13 @@ class SOLOHead(nn.Module):
         #                         zip(ins_preds_level, ins_ind_labels_level)], 0)
         #              for ins_preds_level, ins_ind_labels_level in
         #              zip(ins_pred_list, zip(*ins_ind_gts_list))]
-
-        batch_size = ins_pred_list[0].shape[0]
+        print('memory used before PostProcess', torch.cuda.memory_allocated())
+        print('memory reserved before PostProcess',torch.cuda.memory_reserved())
+        batch_size = ins_pred_list[0].shape[0] # should be 2
         NMS_sorted_scores_list = []
         NMS_sorted_cate_label_list = []
         NMS_sorted_ins_list = []
-        ins_preds = torch.cat(ins_pred_list,dim=1) #desired output shape: bz, all_level s^2, Ori_H/4, Ori_W/4
+        ins_preds = torch.cat(ins_pred_list,dim=1) #desired output shape: batch_size, all_level s^2, Ori_H/4, Ori_W/4
 
 
         cate_preds = [torch.flatten(cate_pred_level,start_dim=1,end_dim=2)
@@ -576,6 +577,10 @@ class SOLOHead(nn.Module):
             NMS_sorted_scores_list.append(NMS_sorted_scores)
             NMS_sorted_cate_label_list.append(NMS_sorted_cate_label)
             NMS_sorted_ins_list.append(NMS_sorted_ins)
+
+        del ins_preds, cate_preds
+        torch.cuda.empty_cache()
+
 
         assert len(NMS_sorted_scores_list) == batch_size #check output shape
         return NMS_sorted_scores_list, NMS_sorted_cate_label_list, NMS_sorted_ins_list
@@ -597,17 +602,30 @@ class SOLOHead(nn.Module):
 
         ## TODO: PostProcess on single image.
         ## Here the function can be modified to process the entire batch together
-        cate_thresh_idx = torch.where(cate_pred_img > self.postprocess_cfg.get('cate_thresh'))
+        ins_pred_img = ins_pred_img.cpu()
+        cate_pred_img = cate_pred_img.cpu()
+        # print('memory used before PostProcessImg',torch.cuda.memory_allocated())
+        # print('memory reserved before PostProcessImg',torch.cuda.memory_reserved())
+
+        # print('memory reserved before delete',torch.cuda.memory_reserved())
+
+        c_max,_ = torch.max(cate_pred_img, dim=1)  # maximum category prediction for each cell
+
+        cate_thresh_idx = torch.where(c_max > self.postprocess_cfg.get('cate_thresh')) #find cells that c_max > cate_thresh
         ins_thresh_idx = torch.where(ins_pred_img > self.postprocess_cfg.get('ins_thresh'))
         cate_pred_img = cate_pred_img[cate_thresh_idx]
         ins_pred_img = ins_pred_img[cate_thresh_idx]
 
-        c_max = torch.max(cate_pred_img,dim=1) #maximum category prediction for each cell
-        indicator_fc = torch.ones_like(ins_pred_img)
+
+        indicator_fc = torch.zeros_like(ins_pred_img)
         indicator_fc[ins_thresh_idx] = 1
+        indicator_cate = torch.zeros_like(ins_pred_img)
+        indicator_cate[cate_thresh_idx] =1
+
+        print('test')
 
         #vectorized, check the shape of each term, could be bug here!
-        mask_score = torch.sum(ins_pred_img * indicator_fc, dim =(-1,-2)) / torch.sum(indicator_fc, dim=(-1,-2)) * c_max
+        mask_score = torch.sum(ins_pred_img * indicator_fc * indicator_cate, dim =(-1,-2)) / torch.sum(indicator_fc * indicator_cate, dim=(-1,-2)) * c_max
 
         # not sure why these should be list of len(bz), asked on piazza, double check !
         sorted_mask_score, sort_idx = torch.sort(mask_score,descending= True)

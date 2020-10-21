@@ -42,7 +42,6 @@ def infer(solo_head,resnet50_fpn, test_loader, device='cpu', mode='infer'):
 
             ## forward
             cate_pred_list, ins_pred_list = solo_head.forward(fpn_feat_list, eval=True)
-
             NMS_sorted_scores_list, NMS_sorted_cate_label_list, NMS_sorted_ins_list = solo_head.PostProcess(
                     ins_pred_list,
                     cate_pred_list,
