@@ -103,32 +103,56 @@ class SOLOHead(nn.Module):
 
 
 
-    def weights_init(self,m):
-        if isinstance(m, nn.Conv2d):
-            nn.init.xavier_uniform_(m.weight)
-            # print('weight',m.weight)
-    # This function initialize weights for head network
+    # def weights_init(self,m):
+    #     if isinstance(m, nn.Conv2d):
+    #         nn.init.xavier_uniform_(m.weight)
+    #         # print('weight',m.weight)
+    # # This function initialize weights for head network
+    #
+    # def bias_init(self,m):
+    #     if isinstance(m, nn.Conv2d):
+    #         nn.init.zeros_(m.bias)
+    #         # print('bias',m.bias)
+    # def _init_weights(self):
+    #     ## TODO: initialize the weights
+    #
+    #     #test
+    #     self.cate_head.apply(self.weights_init)
+    #     self.ins_head.apply(self.weights_init)
+    #     # print('initialized convolutional layer weight')
+    #
+    #     #initialize the bias of the two conv_out layer to 0
+    #     self.cate_out.apply(self.bias_init)
+    #     self.ins_out.apply(self.bias_init)
+    #     # print('initialized bias')
+    #     pass
 
-    def bias_init(self,m):
-        if isinstance(m, nn.Conv2d):
-            nn.init.zeros_(m.bias)
-            # print('bias',m.bias)
     def _init_weights(self):
-        ## TODO: initialize the weights
+        # init weights in cate_head network (No bias)
+        for layer in self.cate_head:
+            for m in layer:
+                if m.__class__.__name__.find('Conv') != -1:
+                    nn.init.xavier_uniform_(m.weight.data)
+        # init weights in cate_out
+        for layer in self.cate_out:
+            if layer.__class__.__name__.find('Conv') != -1:
+                nn.init.xavier_uniform_(layer.weight.data)
+                layer.bias.data.zero_()
 
-        #test
-        self.cate_head.apply(self.weights_init)
-        self.ins_head.apply(self.weights_init)
-        # print('initialized convolutional layer weight')
-
-        #initialize the bias of the two conv_out layer to 0
-        self.cate_out.apply(self.bias_init)
-        self.ins_out.apply(self.bias_init)
-        # print('initialized bias')
-        pass
-
-
-
+        # init weights in ins_head network (No bias)
+        for layer in self.ins_head:
+            for m in layer:
+                if m.__class__.__name__.find('Conv') != -1:
+                    nn.init.xavier_uniform_(m.weight.data)
+        # init weights in ins_out_list
+        for m in self.ins_out:
+            if m.__class__.__name__.find('Conv') != -1:
+                nn.init.xavier_uniform_(m.weight.data)
+                m.bias.data.zero_()
+    #
+    #
+    #
+    #
     def forward(self,
                 fpn_feat_list,
                 eval=False):
@@ -205,9 +229,6 @@ class SOLOHead(nn.Module):
         # resize input to  (b, 256, S,S)
         cate_pred = F.interpolate(fpn_feat, size=(num_grid, num_grid),mode='bilinear')
 
-        # print('cate shape', cate_pred.shape)
-        # print(ins_pred.shape)
-        # exit()
         # forward process for cate branch
         for cate_conv_layer in self.cate_head:
             cate_pred = cate_conv_layer(cate_pred)
@@ -251,7 +272,191 @@ class SOLOHead(nn.Module):
         else:
             pass
         return cate_pred, ins_pred
-
+    #
+    # ## Todo: Lishuo's code
+    # def _init_layers(self):
+    #     # define groupnorm
+    #     num_groups = 32
+    #     # initial the two branch head modulelist
+    #     self.cate_head = nn.ModuleList()
+    #     self.ins_head = nn.ModuleList()
+    #
+    #     ## use for loop to define the almost indentical stack conv layers
+    #     # define cate head
+    #     for l_i in range(self.stacked_convs):
+    #         # define one conv2d layer in cate_head
+    #         in_channel = self.in_channels if l_i == 0 else self.seg_feat_channels
+    #         conv = nn.Sequential(
+    #             # conv2d
+    #             nn.Conv2d(in_channel,
+    #                       self.seg_feat_channels,
+    #                       kernel_size=3,
+    #                       stride=1,
+    #                       padding=1,
+    #                       bias=num_groups is None),
+    #             # norm
+    #             nn.GroupNorm(num_groups=num_groups,
+    #                          num_channels=self.seg_feat_channels),
+    #             # activation function
+    #             nn.ReLU(inplace=True)
+    #         )
+    #         self.cate_head.append(conv)
+    #
+    #         # define one conv2d layer in ins_head
+    #         # note here coordconv add 2 more channel
+    #         in_channel = self.in_channels + 2 if l_i == 0 else self.seg_feat_channels
+    #         conv = nn.Sequential(
+    #             # conv2d
+    #             nn.Conv2d(in_channel,
+    #                       self.seg_feat_channels,
+    #                       kernel_size=3,
+    #                       stride=1,
+    #                       padding=1,
+    #                       bias=num_groups is None),
+    #             # norm
+    #             nn.GroupNorm(num_groups=num_groups,
+    #                          num_channels=self.seg_feat_channels),
+    #             # activation function
+    #             nn.ReLU(inplace=True)
+    #         )
+    #         self.ins_head.append(conv)
+    #
+    #     ## next build the output layer
+    #     # note here: ins_out is not shared across different fpn layer
+    #
+    #     # cate_out layer
+    #     self.cate_out = nn.Conv2d(self.seg_feat_channels,
+    #                               self.cate_out_channels,
+    #                               kernel_size=3,
+    #                               padding=1)
+    #     # build ins_out_list
+    #     self.ins_out_list = nn.ModuleList()
+    #     for num_grid in self.seg_num_grids:
+    #         conv = nn.Conv2d(self.seg_feat_channels,
+    #                          num_grid ** 2,
+    #                          kernel_size=1)
+    #         self.ins_out_list.append(conv)
+    #
+    # # This function initialize weights for head network
+    # def _init_weights(self):
+    #     # init weights in cate_head network (No bias)
+    #     for layer in self.cate_head:
+    #         for m in layer:
+    #             if m.__class__.__name__.find('Conv') != -1:
+    #                 nn.init.xavier_uniform_(m.weight.data)
+    #     # init weights in cate_out
+    #     nn.init.xavier_uniform_(self.cate_out.weight.data)
+    #     self.cate_out.bias.data.zero_()
+    #
+    #     # init weights in ins_head network (No bias)
+    #     for layer in self.ins_head:
+    #         for m in layer:
+    #             if m.__class__.__name__.find('Conv') != -1:
+    #                 nn.init.xavier_uniform_(m.weight.data)
+    #     # init weights in ins_out_list
+    #     for m in self.ins_out_list:
+    #         if m.__class__.__name__.find('Conv') != -1:
+    #             nn.init.xavier_uniform_(m.weight.data)
+    #             m.bias.data.zero_()
+    #
+    # def forward(self,
+    #             fpn_feat_list,
+    #             eval=False):
+    #     '''
+    #       Forward function should forward every levels in the FPN.
+    #       this is done by map function or for loop
+    #       Input:
+    #           fpn_feat_list: backout_list of resnet50-fpn
+    #       Output:
+    #           if eval = False
+    #               cate_pred_list: list, len(fpn_level), each (bz,C-1,S,S)
+    #               ins_pred_list: list, len(fpn_level), each (bz, S^2, 2H_feat, 2W_feat)
+    #           if eval==True
+    #               cate_pred_list: list, len(fpn_level), each (bz,S,S,C-1) / after point_NMS
+    #               ins_pred_list: list, len(fpn_level), each (bz, S^2, Ori_H, Ori_W) / after upsampling
+    #     '''
+    #     new_fpn_list = self.NewFPN(fpn_feat_list)  # stride[8,8,16,32,32]
+    #     # assert new_fpn_list[0].shape[1:] == (256,100,136)
+    #     quart_shape = [new_fpn_list[0].shape[-2] * 2, new_fpn_list[0].shape[-1] * 2]  # stride: 4
+    #     # print('quart_shape',quart_shape)
+    #     # TODO-Done: use MultiApply to compute cate_pred_list, ins_pred_list. Parallel w.r.t. feature level.
+    #     # for i in new_fpn_list:
+    #     #     print(i.shape)
+    #     cate_pred_list, ins_pred_list = \
+    #         self.MultiApply(self.forward_single_level,
+    #                         new_fpn_list, list(range(len(new_fpn_list))), eval=eval,
+    #                         upsample_shape=quart_shape)
+    #
+    #     # assert len(new_fpn_list) == len(self.seg_num_grids)
+    #
+    #     # assert cate_pred_list[1].shape[1] == self.cate_out_channels
+    #     # assert ins_pred_list[1].shape[1] == self.seg_num_grids[1]**2
+    #     # assert cate_pred_list[1].shape[2] == self.seg_num_grids[1]
+    #     return cate_pred_list, ins_pred_list
+    #
+    # def NewFPN(self, fpn_feat_list):
+    #     '''
+    #       This function upsample/downsample the fpn level for the network
+    #       In paper author change the original fpn level resolution
+    #       Input:
+    #           fpn_feat_list, list, len(FPN), stride[4,8,16,32,64]
+    #       Output:
+    #       new_fpn_list, list, len(FPN), stride[8,8,16,32,32]
+    #     '''
+    #
+    #     # downsample the corsest feature map
+    #     fpn_feat_list[0] = F.interpolate(fpn_feat_list[0], scale_factor=0.5)
+    #     # upsample the finest feature map
+    #     fpn_feat_list[-1] = F.interpolate(fpn_feat_list[-1], size=(25, 34))
+    #     return fpn_feat_list
+    #
+    # def forward_single_level(self, fpn_feat, idx, eval=False, upsample_shape=None):
+    #     cate_pred = fpn_feat
+    #     ins_pred = fpn_feat
+    #     num_grid = self.seg_num_grids[idx]  # current level grid
+    #
+    #     ## two branch forward
+    #     # cate branch
+    #     # inter-layers
+    #     for catel_ind, cate_layer in enumerate(self.cate_head):
+    #         # before into conv, first process alignment process
+    #         if catel_ind == self.cate_down_pos:
+    #             cate_pred = F.interpolate(cate_pred, size=num_grid, mode="bilinear", align_corners=False)
+    #         cate_pred = cate_layer(cate_pred)
+    #     # out-layer
+    #     cate_pred = self.cate_out(cate_pred)
+    #     # last add the sigmoid layer to make value [0,1]
+    #     cate_pred = torch.sigmoid(cate_pred)
+    #
+    #     # ins branch
+    #     # coordconv channel add to fpn_feat, note here only add one layer of coordconv
+    #     x = torch.linspace(-1, 1, ins_pred.shape[-1], device=ins_pred.device)
+    #     y = torch.linspace(-1, 1, ins_pred.shape[-2], device=ins_pred.device)
+    #     # build meshgrid
+    #     yy, xx = torch.meshgrid(y, x)
+    #     # expand 2d tensor to 4d s.t. cat to ins_pred
+    #     yy = yy.expand([ins_pred.shape[0], 1, -1, -1])
+    #     xx = xx.expand([ins_pred.shape[0], 1, -1, -1])
+    #     # cat xx&yy
+    #     coordchn = torch.cat([xx, yy], 1)
+    #     # cat coordchn to ins_pred
+    #     ins_pred = torch.cat([ins_pred, coordchn], 1)
+    #     # inter-layers
+    #     for insl_idx, ins_layer in enumerate(self.ins_head):
+    #         ins_pred = ins_layer(ins_pred)
+    #     # upsample the ins_pred before the output_lay
+    #     ins_pred = F.interpolate(ins_pred, scale_factor=2, mode="bilinear", align_corners=False)
+    #     # out-layer, here should use idx information
+    #     ins_out_l = self.ins_out_list[idx]
+    #     ins_pred = ins_out_l(ins_pred)
+    #     # last add the sigmoid layer to make value [0,1]
+    #     ins_pred = torch.sigmoid(ins_pred)
+    #
+    #     # in inference time, upsample the pred to ori image size
+    #     if eval == True:
+    #         ins_pred = F.interpolate(ins_pred, size=upsample_shape, mode="bilinear", align_corners=False)
+    #         cate_pred = self.points_nms(cate_pred).permute(0, 2, 3, 1)
+    #     return cate_pred, ins_pred
 
     # Credit to SOLO Author's code
     # This function do a NMS on the heat map(cate_pred), grid-level
@@ -472,7 +677,7 @@ class SOLOHead(nn.Module):
             idx = torch.where((scale_range[0] < scale)  &( scale< scale_range[1]))[0].tolist()
 
             if len(idx)==0:
-                print('nothing here',i)
+                # print('nothing here',i)
                 cate_label_list.append(cate_label)
                 ins_label_list.append(ins_label)
                 ins_ind_label_list.append(ins_ind_label)
@@ -1030,7 +1235,7 @@ class SOLOHead(nn.Module):
             ins = NMS_sorted_ins_list[i]
 
             print('cate\n',cate)
-            if len(ins)!=0:
+            if ins!=None:
                 for ind in range(len(ins)):
                     # if cate[ind] != 3:
                     obj = ins[ind].numpy()

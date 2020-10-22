@@ -93,8 +93,8 @@ def solo_train(resnet50_fpn, solo_head, train_loader, optimizer,epoch):
         # print(ins_gts_list[0], ins_ind_gts_list[0], cate_gts_list[0])
         ## calculate loss
         total_loss, focal_loss, dice_loss = solo_head.loss(cate_pred_list, ins_pred_list, ins_gts_list, ins_ind_gts_list, cate_gts_list)
-        print(total_loss, focal_loss, dice_loss)
-        exit()
+        # print(total_loss, focal_loss, dice_loss)
+        # exit()
 
         # print("--- %s sec ---" % ((time.time() - start_time)))
 

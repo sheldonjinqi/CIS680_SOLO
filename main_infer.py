@@ -20,12 +20,15 @@ import os
 
 
 def load_model(net, optimizer, device,epoch_num=0):
-    path = os.path.join('./network_result1/', 'solo_epoch_' + str(epoch_num))
+    path = os.path.join('./network_result1/', 'solo_epoch_li' + str(epoch_num))
+    # path = os.path.join('./network_result_21/', 'solo_epoch_' + str(epoch_num))
     checkpoint = torch.load(path,map_location=torch.device(device))
     net.load_state_dict(checkpoint['model_state_dict'])
     optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
     epoch = checkpoint['epoch']
     print('Model loaded')
+    # print(net)
+    # exit()
     return net, optimizer
 
 def infer(solo_head,resnet50_fpn, test_loader, device='cpu', mode='infer'):
@@ -117,8 +120,8 @@ def main_infer(mode='infer'):
 
     ## only check the final model we have, output example figures
     if mode == 'infer':
-        solo_head, optimizer = load_model(solo_head, optimizer, device, epoch_num=50)
-        map = infer(solo_head,resnet50_fpn, train_loader, device=device, mode='map')
+        solo_head, optimizer = load_model(solo_head, optimizer, device, epoch_num=27)
+        map = infer(solo_head,resnet50_fpn, train_loader, device=device, mode='infer')
 
         print(map)
 
