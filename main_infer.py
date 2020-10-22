@@ -71,8 +71,8 @@ def infer(solo_head,resnet50_fpn, test_loader, device='cpu', mode='infer'):
                 match, scores, trues = solo_head.evaluation(NMS_sorted_scores_list,
                                                             NMS_sorted_cate_label_list,
                                                             NMS_sorted_ins_list,
-                                                            ins_gts_list,
-                                                            cate_gts_list)
+                                                            label_list,
+                                                            mask_list)
 
                 for cls in range(3):
                     if len(match[cls]) > 0:
@@ -118,7 +118,7 @@ def main_infer(mode='infer'):
     ## only check the final model we have, output example figures
     if mode == 'infer':
         solo_head, optimizer = load_model(solo_head, optimizer, device, epoch_num=50)
-        map = infer(solo_head,resnet50_fpn, train_loader, device=device, mode='infer')
+        map = infer(solo_head,resnet50_fpn, train_loader, device=device, mode='map')
 
         print(map)
 

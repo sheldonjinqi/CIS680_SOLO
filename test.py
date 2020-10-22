@@ -63,9 +63,54 @@ def test_loss(solo_head_net):
 
     print('completed test')
 
-def test_postprocess():
-    pass
+def test_target(solo_head_net):
+    target_input_path = "./data/target_input.npz"
+    target_output_path = "./data/target_output.npz"
+
+    target_in = np.load(target_input_path, allow_pickle=True)
+    # print(target_in.files)
+    gt_bboxes_raw = torch.from_numpy(target_in['gt_bboxes_raw'])
+    gt_labels_raw = torch.from_numpy(target_in['gt_labels_raw'])
+    gt_masks_raw = torch.from_numpy(target_in['gt_masks_raw'])
+    featmap_sizes = target_in['featmap_sizes']
+    print('featmap_sizes',featmap_sizes)
+
+    target_out = np.load(target_output_path, allow_pickle=True)
+    ins_label_list = target_out['ins_label_list']
+    ins_ind_label_list = target_out['ins_ind_label_list']
+    cate_label_list = target_out['cate_label_list']
+
+    t_ins_label_ls, t_ins_ind_label_ls, t_cate_label_ls = \
+        solo_head_net.target_single_img(gt_bboxes_raw,
+                                        gt_labels_raw,
+                                        gt_masks_raw,
+                                        featmap_sizes)
+    for i in range(5):
+        print((t_ins_label_ls[i].numpy() - ins_label_list[i]).sum())
+        print((t_ins_ind_label_ls[i].numpy() != ins_ind_label_list[i]).sum())
+        # print(t_ins_ind_label_ls[i].numpy(), ins_ind_label_list[i])
+        print((t_cate_label_ls[i].numpy()-cate_label_list[i]).sum())
+
+        print('************')
+    print(torch.where(t_cate_label_ls[2]))
+    print('************')
+    print(np.where(cate_label_list[2]))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 if __name__ == '__main__':
     solo_head_net = solo_head.SOLOHead(num_classes=4)
-    test_loss(solo_head_net)
+    # test_loss(solo_head_net)
+    test_target(solo_head_net)

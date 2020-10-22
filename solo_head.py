@@ -417,7 +417,7 @@ class SOLOHead(nn.Module):
         # remember, you want to construct target of the same resolution as prediction output in training
 
         featmap_sizes = [[(featmap.shape[2],featmap.shape[3]) for featmap in ins_pred_list ]] * len(mask_list)
-        ins_gts_list, ins_ind_gts_list, cate_gts_list = self.MultiApply(self.targer_single_img, \
+        ins_gts_list, ins_ind_gts_list, cate_gts_list = self.MultiApply(self.target_single_img, \
                                                                               bbox_list, label_list,
                                                                               mask_list, featmap_sizes
                                                                               )
@@ -441,7 +441,7 @@ class SOLOHead(nn.Module):
         # ins_label_list: list, len: len(FPN), (S^2, 2H_feat, 2W_feat)
         # cate_label_list: list, len: len(FPN), (S, S)
         # ins_ind_label_list: list, len: len(FPN), (S^2, )
-    def targer_single_img(self,
+    def target_single_img(self,
                           gt_bboxes_raw,
                           gt_labels_raw,
                           gt_masks_raw,
@@ -457,13 +457,13 @@ class SOLOHead(nn.Module):
 
         w = torch.abs(gt_bboxes_raw[:,0] - gt_bboxes_raw[:,2]).to(self.device)
         h = torch.abs(gt_bboxes_raw[:,3] - gt_bboxes_raw[:,1]).to(self.device)
-        scale = torch.sqrt(w * h)
+        scale = torch.sqrt(w * h) #(n,)
         center_list = np.asarray([ndimage.measurements.center_of_mass(mask.numpy()) for mask in gt_masks_raw])
 
         #go through each layer of feature pyramid -> loop of 5
         for i in range(len(self.seg_num_grids)):
-            cate_label = torch.zeros((self.seg_num_grids[i],self.seg_num_grids[i])).to(self.device)
-            ins_label = torch.zeros((self.seg_num_grids[i]**2,featmap_sizes[i][0],featmap_sizes[i][1])).to(self.device)
+            cate_label = torch.zeros((self.seg_num_grids[i],self.seg_num_grids[i])).to(self.device) #(s,s)
+            ins_label = torch.zeros((self.seg_num_grids[i]**2,featmap_sizes[i][0],featmap_sizes[i][1])).to(self.device)#(s^2, w_feat,h_feat)
             ins_ind_label = torch.zeros(self.seg_num_grids[i]**2,dtype=torch.bool).to(self.device)
             scale_range = self.scale_ranges[i]
 
@@ -472,6 +472,7 @@ class SOLOHead(nn.Module):
             idx = torch.where((scale_range[0] < scale)  &( scale< scale_range[1]))[0].tolist()
 
             if len(idx)==0:
+                print('nothing here',i)
                 cate_label_list.append(cate_label)
                 ins_label_list.append(ins_label)
                 ins_ind_label_list.append(ins_ind_label)
@@ -481,24 +482,32 @@ class SOLOHead(nn.Module):
             center = torch.Tensor(center_list[idx]).view(-1,2).to(self.device)
             center_x = center[:,0]
             center_y = center[:,1]
-            w *= 0.2
-            h *= 0.2
-
-            x_tl = center_x - w/2 # shape(#obj, 1)
-            y_tl = center_y - h/2
-            x_br = center_x + w/2
-            y_br = center_y + h/2
-
-            x_tl_grid = x_tl//(800//self.seg_num_grids[i])
-            y_tl_grid = y_tl//(1088//self.seg_num_grids[i])
-            x_br_grid = x_br//(800//self.seg_num_grids[i])
-            y_br_grid = y_br//(1088//self.seg_num_grids[i])
-
-            center_x /= 800/self.seg_num_grids[i]
-            center_y /= 1088/self.seg_num_grids[i]
 
 
-            zero_msk = torch.zeros((self.seg_num_grids[i], self.seg_num_grids[i])).to(self.device)
+            x_tl = center_x - h*0.5*0.2 # shape(#obj, 1)
+            y_tl = center_y - w*0.5*0.2
+            x_br = center_x + h*0.5*0.2
+            y_br = center_y + w*0.5*0.2
+
+            x_tl_grid = (x_tl/800 * self.seg_num_grids[i])#.type(torch.int)
+            y_tl_grid = (y_tl/1088*self.seg_num_grids[i])#.type(torch.int)
+            x_br_grid = (x_br/800*self.seg_num_grids[i])#.type(torch.int)
+            y_br_grid = (y_br/1088*self.seg_num_grids[i])#.type(torch.int)
+
+
+
+            center_x /= (800/self.seg_num_grids[i])
+            center_y /= (1088/self.seg_num_grids[i])
+            # center_x = center_x.type(torch.int)
+            # center_y = center_y.type(torch.int)
+
+            x_tl_grid = torch.max(x_tl_grid, center_x - 1)#.type(torch.int)
+            x_br_grid = torch.min(x_br_grid, center_x + 2)#.type(torch.int)
+            y_tl_grid = torch.max(y_tl_grid, center_y - 1)#.type(torch.int)
+            y_br_grid = torch.min(y_br_grid, center_y + 2)#.type(torch.int)
+
+
+            # zero_msk = torch.zeros((self.seg_num_grids[i], self.seg_num_grids[i])).to(self.device)
 
             # print('num of objects in this layer', len(idx))
             # print('object label', labels)
@@ -507,31 +516,41 @@ class SOLOHead(nn.Module):
             #loop through each object thats falls in the range for cate_label
             for k in range(len(labels)):
                 # creat cate_label
-                temp_cate_label = torch.zeros_like(cate_label).to(self.device)
+                temp_cate_label = torch.zeros_like(cate_label).to(self.device) # (s,s)
+                # zero_msk = torch.zeros((self.seg_num_grids[i], self.seg_num_grids[i])).to(self.device)
+                # zero_msk[int(center_x[k]) - 1:int(center_x[k]) + 2,
+                # int(center_y[k]) - 1:int(center_y[k]) + 2] = 1
+
                 temp_cate_label[int(x_tl_grid[k]):int(x_br_grid[k])+1,
                            int(y_tl_grid[k]):int(y_br_grid[k])+1] = labels[k]
-                cate_label[temp_cate_label > 0] = labels[k]
-                zero_msk[int(center_x[k])-1:int(center_x[k])+2,
-                         int(center_y[k])-1:int(center_y[k])+2] = 1
+
+                # temp_cate_label *= zero_msk
+
+                cate_label[temp_cate_label > 0] = labels[k] # labels:(num_instance,) #cate_label(s,s)
+
+                # mask out anything larger than 3x3
+
 
                 channel_inds = (temp_cate_label == labels[k]).nonzero()
+
                 channels = channel_inds[:,0] * self.seg_num_grids[i] + channel_inds[:,1]
                 ins_layer = ins_layers[k]  #assign corresponding mask
                 ins_layer = ins_layer.expand(1,1,ins_layer.shape[0],ins_layer.shape[1])
-                ins_layer = F.interpolate(ins_layer, size = featmap_sizes[i],mode='bilinear')
+                ins_layer = F.interpolate(ins_layer, size = (featmap_sizes[i][0],featmap_sizes[i][1]),mode='bilinear')
                 ins_layer = torch.squeeze(ins_layer)
+                # print(ins_layer.max(),ins_layer.mode())
                 ins_layer[ins_layer > 0] = 1
-                ins_layer = torch.clamp(ins_layer, 0, 1)
+                # ins_layer = torch.clamp(ins_layer, 0, 1)
                 # check this line why index 0  ?
                 ins_label[channels, :, :] = ins_layer
                 ins_ind_label[channels] = True
 
-            # turn off grids outside 3x3
-            cate_label *= zero_msk
             cate_label_list.append(cate_label)
-
             ins_label_list.append(ins_label)
             ins_ind_label_list.append(ins_ind_label)
+            #
+            # if i==1:
+            #     print('cate_label\n',cate_label)
 
 
         # check flag
@@ -541,15 +560,7 @@ class SOLOHead(nn.Module):
 
         return ins_label_list, ins_ind_label_list, cate_label_list
 
-    # This function receive pred list from forward and post-process
-    # Input:
-        # ins_pred_list: list, len(fpn), (bz,S^2,Ori_H/4, Ori_W/4)
-        # cate_pred_list: list, len(fpn), (bz,S,S,C-1)
-        # ori_size: [ori_H, ori_W]
-    # Output:
-        # NMS_sorted_scores_list, list, len(bz), (keep_instance,)
-        # NMS_sorted_cate_label_list, list, len(bz), (keep_instance,)
-        # NMS_sorted_ins_list, list, len(bz), (keep_instance, ori_H, ori_W)
+
     '''
     def PostProcess(self,
                     ins_pred_list,
@@ -1045,13 +1056,13 @@ class SOLOHead(nn.Module):
         #     plt.show()
 
     def evaluation(self, NMS_sorted_scores_list, NMS_sorted_cate_label_list,
-                   NMS_sorted_ins_list, ins_gts_list, cate_gts_list):
+                   NMS_sorted_ins_list, label_list, mask_list):
         '''
         :param NMS_sorted_scores_list:
         :param NMS_sorted_cate_label_list: shape:(bz, instance_number, 1)
         :param NMS_sorted_ins_list: shape:(bz, instance_number, ori_h, ori_w)
-        :param ins_gts_list: (bz, instance_number)
-        :param cate_gts_list: (bz, instance_number, ori_h, ori_w)
+        :param label_list: (bz, instance_number)
+        :param mask_list: (bz, instance_number, ori_h, ori_w)
         :return:
         '''
 
@@ -1059,7 +1070,46 @@ class SOLOHead(nn.Module):
         match = {0: [], 1: [], 2: []}  # prediction &grnd truth same class and IoU > 0.5.
         scores = {0: [], 1: [], 2: []}  # track of the confidence score for every prediction
         trues = {0: 0, 1: 0, 2: 0}
-        print(NMS_sorted_cate_label_list, NMS_sorted_ins_list, ins_gts_list, cate_gts_list)
+        print(NMS_sorted_cate_label_list, NMS_sorted_ins_list, label_list, mask_list)
+
+        iou_thresh = 0.5
+
+        for i in range(len(NMS_sorted_cate_label_list)):
+            ins_gt_dic = {0: [], 1: [], 2: []}
+            ## count all true label per category
+            label_list[i] = label_list[i] - 1
+            trues[0] += (label_list[i] == 0).sum()
+            trues[1] += (label_list[i] == 1).sum()
+            trues[2] += (label_list[i] == 2).sum()
+
+            cate_gt = label_list[i].cpu().detach().numpy()
+            cate_pred = NMS_sorted_cate_label_list[i].cpu().detach().numpy()
+
+            ins_gts_list[i] = ins_gts_list[i].to(self.device)
+            label_list[i] = label_list[i].to(self.device)
+            for j in range(cate_gt.shape[0]):
+                ins_gt_dic[cate_gt[j]].append(ins_gts_list[i][j])
+
+            for j in range(cate_pred.shape[0]):
+                if cate_pred[j] == 3:
+                    continue
+                score[cate_pred[j]].append(score_list[i][j])
+                match_temp = 0
+                for item in ins_gt_dic[cate_pred[j]]:
+                    compare = torch.cat((ins_pred_list[i][j].reshape(1, -1), item.reshape(1, -1)), dim=0)
+                    intersection = torch.mm(compare, compare.T)
+                    areas = compare.sum(dim=1).expand(compare.shape[0], compare.shape[0])
+                    union = areas + areas.T - intersection + 1e-8
+                    ious = (intersection / union).triu(diagonal=1)
+                    iou = ious[0, 1]
+                    if iou > iou_thresh:
+                        match_temp = 1
+                        break
+                match[cate_pred[j]].append(match_temp)
+
+
+
+
 
         # ## create selection mask from gnd truth label
         # labelMask = out_NMS[:, 0, :, :] != 0
