@@ -178,9 +178,10 @@ def main():
       optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
       epoch_loaded = checkpoint['epoch']
       print('loaded model')
+      epoch_loaded += 1
 
     # Train your network here
-    epoch_loaded += 1
+
     num_epochs = 50
     total_loss_list = []
     focal_loss_list = []
