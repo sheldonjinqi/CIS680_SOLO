@@ -9,6 +9,7 @@ import os
 def load_model(net, optimizer, device,epoch_num=0):
     # path = os.path.join('./network_result1/', 'solo_epoch_li' + str(epoch_num))
     path = os.path.join('./network_result_21/', 'solo_epoch_' + str(epoch_num))
+    path = os.path.join('', 'solo_epoch_' + str(epoch_num))
     checkpoint = torch.load(path,map_location=torch.device(device))
     net.load_state_dict(checkpoint['model_state_dict'])
     optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
@@ -90,9 +91,9 @@ def main_infer():
                           lr=learning_rate, momentum=0.9, weight_decay=1e-4)
 
     ## only check the final model we have, output example figures
-    solo_head, optimizer = load_model(solo_head, optimizer, device, epoch_num=46)
+    solo_head, optimizer = load_model(solo_head, optimizer, device, epoch_num=40)
     map, map_list = infer(solo_head,resnet50_fpn, test_loader, device=device, mode='infer')
-    print('map, map_list ',map, map_list )
+    print('map, map_list ',map, map_list)
 
 if __name__ == '__main__':
     main_infer()

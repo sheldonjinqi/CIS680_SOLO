@@ -514,88 +514,125 @@ class SOLOHead(nn.Module):
                     ins_pred_list,
                     cate_pred_list,
                     ori_size):
-        # indicate some constant
-        bz = cate_pred_list[0].shape[0]
-        num_levels = len(cate_pred_list)
 
+        ## TODO: finish PostProcess
+        ## finished, needs to be tested, can be vectorized to process entire batch together once tested PostProcessImg
+
+        # ins_pred_list = [torch.cat([ins_preds_level_img[ins_ind_labels_level_img.type(torch.long), ...]
+        #                         for ins_preds_level_img, ins_ind_labels_level_img in
+        #                         zip(ins_preds_level, ins_ind_labels_level)], 0)
+        #              for ins_preds_level, ins_ind_labels_level in
+        #              zip(ins_pred_list, zip(*ins_ind_gts_list))]
+        # print('memory used before PostProcess', torch.cuda.memory_allocated())
+        # print('memory reserved before PostProcess',torch.cuda.memory_reserved())
+        batch_size = ins_pred_list[0].shape[0]  # should be 2
         NMS_sorted_scores_list = []
         NMS_sorted_cate_label_list = []
         NMS_sorted_ins_list = []
+        ins_preds = torch.cat(ins_pred_list, dim=1)  # desired output shape: batch_size, all_level s^2, Ori_H/4, Ori_W/4
 
-        # loop through images
-        for img_ind in range(bz):
-            # for each img, rebuild the ins_pred_img and cate_pred_img to include all fpn levels
-            ins_pred_img = [ins_pred_list[level_ind][img_ind] for level_ind in range(num_levels)]
-            cate_pred_img = [cate_pred_list[level_ind][img_ind].reshape(-1, self.cate_out_channels)
-                             for level_ind in range(num_levels)]
-
-            # ins_pred_img: (all_level_S^2, ori_H/4, ori_W/4)
-            # cate_pred_img: (all_level_S^2, C-1)
-            ins_pred_img = torch.cat(ins_pred_img, dim=0)
-            cate_pred_img = torch.cat(cate_pred_img, dim=0)
-
-            NMS_sorted_scores, NMS_sorted_cate_label, NMS_sorted_ins = self.PostProcessImg(ins_pred_img, cate_pred_img,
+        cate_preds = [torch.flatten(cate_pred_level, start_dim=1, end_dim=2)
+                      for cate_pred_level in cate_pred_list]  # list, len fpn, (bz,s^2, c-1)
+        cate_preds = torch.cat(cate_preds, 1)  # resulting shape should be  (bz,all_level_s^2,c-1)
+        # loop through images in batch
+        for i in range(batch_size):
+            NMS_sorted_scores, NMS_sorted_cate_label, NMS_sorted_ins = self.PostProcessImg(ins_preds[i], cate_preds[i],
                                                                                            ori_size)
             NMS_sorted_scores_list.append(NMS_sorted_scores)
             NMS_sorted_cate_label_list.append(NMS_sorted_cate_label)
             NMS_sorted_ins_list.append(NMS_sorted_ins)
-        return NMS_sorted_scores_list, NMS_sorted_cate_label_list, NMS_sorted_ins_list
 
+        del ins_preds, cate_preds
+        torch.cuda.empty_cache()
+
+        assert len(NMS_sorted_scores_list) == batch_size  # check output shape
+        return NMS_sorted_scores_list, NMS_sorted_cate_label_list, NMS_sorted_ins_list
 
     # This function Postprocess on single img
     # Input:
     # ins_pred_img: (all_level_S^2, ori_H/4, ori_W/4)
     # cate_pred_img: (all_level_S^2, C-1)
     # Output:
+    # bz = 1 since we only process one image at a time
     # NMS_sorted_scores_list, list, len(bz), (keep_instance,)
     # NMS_sorted_cate_label_list, list, len(bz), (keep_instance,)
     # NMS_sorted_ins_list, list, len(bz), (keep_instance, ori_H, ori_W)
+
     def PostProcessImg(self,
                        ins_pred_img,
                        cate_pred_img,
                        ori_size):
-        # thresholding on cate_pred_img to select active grids.
 
-        # include the active grid index and associated label information
-        cate_act_ind_matrix = cate_pred_img >= self.postprocess_cfg["cate_thresh"]
-        act_ind = cate_act_ind_matrix.nonzero()
-        act_grid = act_ind[:, 0]  # len(n_act)
-        act_cate_label = act_ind[:,
-                         1] + 1  # (n_act,) here need +1 since cate_out_channel don't conclude background information
-        act_ins = ins_pred_img[act_grid]  # (n_act, ori_H/4, ori_W/4)
-        assert act_ins.shape[0] == len(act_grid)
+        # ## TODO: PostProcess on single image.
+        # Here the function can be modified to process the entire batch together
+        ins_pred_img = ins_pred_img.cpu()
+        cate_pred_img = cate_pred_img.cpu()
+        # print('memory used before PostProcessImg',torch.cuda.memory_allocated())
+        # print('memory reserved before PostProcessImg',torch.cuda.memory_reserved())
 
-        # scores
-        cate_scores = cate_pred_img[cate_act_ind_matrix]  # this is flatten, len(n_act)
-        assert cate_scores.shape == (len(act_grid),)
-        act_mask_sum = (act_ins >= self.postprocess_cfg["ins_thresh"]).sum([1, 2]).float()  # (n_act,)
-        mask_scores = ((act_ins * (act_ins >= self.postprocess_cfg["ins_thresh"])).sum([1, 2])) / act_mask_sum  # (n_act,)
-        scores = cate_scores * mask_scores  # (n_act,)
-        scores = scores[~torch.isnan(scores)]
-        # pre-nms filter
-        scores_sort_ind = torch.argsort(scores, descending=True)  # (n_act)
-        if len(scores_sort_ind) > self.postprocess_cfg["pre_NMS_num"]:
-            scores_sort_ind = scores_sort_ind[:self.postprocess_cfg["pre_NMS_num"]]
-        sorted_scores = scores[scores_sort_ind]  # (pre_NMS_num,)
-        sorted_cate_label = act_cate_label[scores_sort_ind]  # (pre_NMS_num,)
-        sorted_ins = act_ins[scores_sort_ind]  # (pre_NMS_num, ori_H/4, ori_W/4)
+        # print('memory reserved before delete',torch.cuda.memory_reserved())
 
-        # Matrix NMS
-        decay_scores = self.MatrixNMS(sorted_ins, sorted_scores, method='gauss', gauss_sigma=0.5)
-        if decay_scores is None:
+        c_max, _ = torch.max(cate_pred_img, dim=1)  # maximum category prediction for each cell
+
+        cate_thresh_idx = torch.where(
+            c_max > self.postprocess_cfg.get('cate_thresh'))  # find cells that c_max > cate_thresh
+        ins_thresh_idx = torch.where(ins_pred_img > self.postprocess_cfg.get('ins_thresh'))
+
+        if len(cate_thresh_idx[0]) == 0:
+            print('no grid above threshold')
             return None, None, None
-        NMS_scores_sorted_ind = torch.argsort(decay_scores, descending=True)  # (n_act,)
-        if len(NMS_scores_sorted_ind) > self.postprocess_cfg["keep_instance"]:
-            NMS_scores_sorted_ind = NMS_scores_sorted_ind[:self.postprocess_cfg["keep_instance"]]
-        NMS_sorted_scores = decay_scores[NMS_scores_sorted_ind]  # (keep_instance,)
-        NMS_sorted_cate_label = sorted_cate_label[NMS_scores_sorted_ind]  # (keep_instance,)
-        NMS_sorted_ins = sorted_ins[NMS_scores_sorted_ind]  # (keep_instance, ori_H/4, ori_W/4)
-        # upsample the NMS_sorted_ins to ori_size
-        NMS_sorted_ins = F.interpolate(NMS_sorted_ins.unsqueeze(0), size=ori_size, mode="bilinear",
-                                       align_corners=False).squeeze(0)
 
-        return NMS_sorted_scores, NMS_sorted_cate_label, NMS_sorted_ins
+        indicator_fc = torch.zeros_like(ins_pred_img)
+        indicator_cate = torch.zeros_like(ins_pred_img)
 
+        ins_pred_img_tmp = ins_pred_img[cate_thresh_idx]
+        cate_pred_img_tmp = cate_pred_img[cate_thresh_idx]
+
+        indicator_fc[ins_thresh_idx] = 1
+        indicator_cate[cate_thresh_idx] = 1
+
+        print('test')
+
+        # vectorized, check the shape of each term, could be bug here! mask score of each grid cell
+        mask_score = torch.sum(ins_pred_img * indicator_fc * indicator_cate, dim=(-1, -2)) / \
+                     torch.sum(indicator_fc * indicator_cate, dim=(-1, -2)) * c_max
+        mask_score[torch.isnan(mask_score)] = 0  # set all undefined scores from below threshold grid to zero
+        # not sure why these should be list of len(bz), asked on piazza, double check !
+        sorted_mask_score, sort_idx = torch.sort(mask_score, descending=True)
+        sorted_cate_pred = cate_pred_img[sort_idx]
+        sorted_ins_pred = ins_pred_img[sort_idx]
+        n_act = len(torch.nonzero(sorted_mask_score))
+
+        # select the elements that belong to activated grids
+        sorted_mask_score = sorted_mask_score[:n_act]
+        sorted_cate_pred = sorted_cate_pred[:n_act]
+        sorted_ins_pred = sorted_ins_pred[:n_act]
+        NMS_score = self.MatrixNMS(sorted_ins_pred, sorted_mask_score)
+        if NMS_score is None:
+            return None, None, None
+        sorted_NMS_score, NMS_idx = torch.sort(NMS_score, descending=True)
+
+        # Pick 5 cells with highest NMS_score
+        if len(NMS_idx) > self.postprocess_cfg["keep_instance"]:
+            NMS_idx = NMS_idx[:self.postprocess_cfg["keep_instance"]]
+        sorted_cate_pred = sorted_cate_pred[NMS_idx]
+        sorted_ins_pred = sorted_ins_pred[NMS_idx]
+        sorted_NMS_score = sorted_mask_score[NMS_idx]
+
+        # Upsample the mask to ori_size
+        sorted_ins_pred = F.interpolate(sorted_ins_pred.unsqueeze(0), size=ori_size, mode="bilinear")
+        sorted_ins_pred = sorted_ins_pred.squeeze(0)
+        # #pick the 5 highest
+        # decay_threshold = 0.2
+        # keep_instance = max(min((NMS_score > decay_threshold).sum(), 5), 1)
+        # keep_instance = 5
+        # sorted_NMS_score = sorted_NMS_score[:keep_instance]
+        # sorted_cate_pred = sorted_cate_pred[:keep_instance]
+        # # sorted_ins_pred = sorted_ins_pred[:keep_instance] ##### bug!
+
+        _, sorted_cate_pred = torch.max(sorted_cate_pred, dim=1)
+
+        return sorted_NMS_score, sorted_cate_pred, sorted_ins_pred
 
     # This function perform matrix NMS
     # Input:
@@ -604,35 +641,41 @@ class SOLOHead(nn.Module):
     # Output:
     # decay_scores: (n_act,)
     def MatrixNMS(self, sorted_ins, sorted_scores, method='gauss', gauss_sigma=0.5):
-        # change to hard mask /need to check if the input sorted_ins is soft/
+        ## TODO: finish MatrixNMS
+
+        # #compute IOU
+        # make the mask binary mask
         sorted_ins[sorted_ins > self.postprocess_cfg["ins_thresh"]] = 1
         sorted_ins[sorted_ins <= self.postprocess_cfg["ins_thresh"]] = 0
-        # indicate the active instance number
-        n_act = sorted_ins.shape[0]
-        if n_act == 0:
-            return None
-        # flatten masks and build 2d matrix
-        masks = sorted_ins.reshape(n_act, -1)
-        # compute intersection areas (pixel numbers)
-        intersection = masks @ masks.T
-        # compute areas
-        areas = masks.sum(dim=1).expand(n_act, n_act)  # (n_act, n_act)
-        # compute union
-        union = areas + areas.T - intersection  # (n_act, n_act)
-        # compute IoU and keep the upper triangle, since we want to compare across larger scores
-        ious = (intersection / union).triu(diagonal=1)  # (n_act, n_act)
-        ious_cmax, _ = ious.max(dim=0)  # (n_act,)
-        ious_cmax = ious_cmax.expand(n_act, n_act).T  # (n_act, n_act)
-        # compute the decay matrix
-        if method == "gauss":
-            decay = torch.exp(-(ious ** 2 - ious_cmax ** 2) / gauss_sigma)
-        else:
-            decay = (1 - ious) / (1 - ious_cmax)
-        decay[torch.isnan(decay)] = np.inf
-        # get the decay value for each instance
-        decay, _ = decay.min(dim=0)  # (n_act,)
 
-        return sorted_scores * decay
+        num_mask = len(sorted_scores)
+        flatten_mask = torch.flatten(sorted_ins, start_dim=1)
+        intersection_mat = flatten_mask @ flatten_mask.T
+        area_mat = torch.sum(flatten_mask, dim=1).expand(num_mask, num_mask)
+        union_mat = area_mat + area_mat.T - intersection_mat
+
+        # not sure why this but suggested in pseudocode, scores on sorted, uppertrianguler keeps the elements i<j
+        # , which indicates s_i > s_j, thus satisfy the constrint
+        iou_mat = intersection_mat / union_mat
+        iou_mat = torch.triu(iou_mat, diagonal=1)
+
+        iou_max, _ = torch.max(iou_mat, dim=0)
+        ious_max = iou_max.expand(num_mask, num_mask).T
+
+        # # alternative approach
+        # iou_mat = iou_mat - torch.eye(len(iou_mat)) #shape: n_act x n_act
+        # iou_max = torch.max(iou_mat,dim=1).expand(num_mask,num_mask).T # max iou between mask_i and the rest of masks
+
+        if method == 'gauss':
+            decay_mat = torch.exp(-(iou_mat ** 2 - ious_max ** 2) / gauss_sigma)
+        else:  # linear function
+            decay_mat = (1 - iou_mat) / (1 - iou_max)
+
+        # decay_mat
+        decay, _ = torch.min(decay_mat, dim=0)  # shape: (n_act,)
+        decay_scores = decay * sorted_scores
+        return decay_scores
+
 
     # -----------------------------------
     ## The following code is for visualization
